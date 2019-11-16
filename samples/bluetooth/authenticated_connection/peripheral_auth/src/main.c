@@ -34,9 +34,14 @@
 
 struct bt_conn *default_conn;
 
+/**
+ * Set up the advertising data
+ */
 static const struct bt_data ad[] = {
         BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
-        BT_DATA_BYTES(BT_DATA_UUID16_ALL, 0x10, 0x30 ),
+        BT_DATA_BYTES(BT_DATA_UUID16_ALL, 0x10, 0x30 ),  //BT_UUID_AUTH_SVC
+        // "Auth Svc"
+        BT_DATA_BYTES(BT_DATA_NAME_SHORTENED, 0x41, 0x75, 0x74, 0x68, 0x20, 0x53, 0x76, 0x63),
 };
 
 /**

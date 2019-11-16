@@ -189,7 +189,7 @@ static bool bt_adv_data_found(struct bt_data *data, void *user_data)
                  * Is this the service we're looking for? If not continue
                  * else stop the scan and connect to the device.
                  */
-                if (bt_uuid_cmp(uuid, BT_UUID_HRS)) {
+                if (bt_uuid_cmp(uuid, BT_UUID_AUTH_SVC)) {
                     continue;
                 }
 
