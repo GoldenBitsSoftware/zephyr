@@ -164,6 +164,22 @@ struct bt_uuid_128 {
  *  @brief Environmental Sensing Service
  */
 #define BT_UUID_ESS                       BT_UUID_DECLARE_16(0x181a)
+/** @def BT_UUID_AUTH_SVC
+*  @brief Authentication service
+ *
+ *  @note  This UUID is unofficial, For development purposes
+ *  it should be used as if it is one of the approved standard BLE
+ *  UUID using the official BLE uuid base: 00000000-0000-1000-8000-00805F9B34FB
+*/
+#define BT_UUID_AUTH_SVC                  BT_UUID_DECLARE_16(0x3010)
+/** @def BT_UUID_AUTH_CLIENT
+ *  @brief Characteristic used to handle DTLS exchange as a client (ie BLE Central)
+ */
+#define BT_UUID_AUTH_SVC_CLIENT           BT_UUID_DECLARE_16(0x3015)
+/** @def BT_UUID_AUTH_SERVER
+ *  @brief Characteristic used to handle DTLS exchange as a server (ie BLE peripherial)
+ */
+#define BT_UUID_AUTH_SVC_SERVER           BT_UUID_DECLARE_16(0x3016)
 /** @def BT_UUID_IPSS
  *  @brief IP Support Service
  */
