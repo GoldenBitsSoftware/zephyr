@@ -88,14 +88,28 @@ static ssize_t client_write(struct bt_conn *conn, const struct bt_gatt_attr *att
 /* AUTH Service Declaration */
 BT_GATT_SERVICE_DEFINE(auth_svc,
         BT_GATT_PRIMARY_SERVICE(BT_UUID_AUTH_SVC),
-        // client characteristic, used by server write/post a response to client.
-        // Server sets response to this characterstic and sets
-        // notification which causes the client to read this characteristic
-        BT_GATT_CHARACTERISTIC(BT_UUID_AUTH_SVC_CLIENT, BT_GATT_CHRC_READ|BT_GATT_CHRC_NOTIFY,
+
+        /**
+         *    Central (client role) bt_gatt_write()  ---> client characteristic --> Peripheral (server role)
+         *
+         *                Central    <---  Notification  <--- Peripheral
+         *        Central   bt_gatt_read() <----------- Peripheral
+         */
+
+        /**
+         * client characteristic, used by the peripheral (server role) to write messages authentication messages
+         * to the central (client role).  The peripheral needs to alert the central a message is
+         * ready to be read.
+         */
+        BT_GATT_CHARACTERISTIC(BT_UUID_AUTH_SVC_CLIENT, BT_GATT_CHRC_WRITE|BT_GATT_CHRC_NOTIFY,
                                BT_GATT_PERM_READ, client_read, NULL, NULL),
         BT_GATT_CCC(client_ccc_cfg_changed,
                     BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
-        // Server characteristic, written by client, read by the server
+
+        /**
+         * Server characteristic, used by the central (client role)  to write authentication messages to.
+         * to the server (peripheral)
+         */
         BT_GATT_CHARACTERISTIC(BT_UUID_AUTH_SVC_SERVER, BT_GATT_CHRC_WRITE,
                                BT_GATT_PERM_READ, NULL, client_write, server_input_buffer),
 

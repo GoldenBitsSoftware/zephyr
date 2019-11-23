@@ -13,6 +13,8 @@
 #include <sys/printk.h>
 #include <sys/byteorder.h>
 #include <zephyr.h>
+#include <device.h>
+#include <drivers/gpio.h>
 
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/hci.h>
@@ -20,6 +22,29 @@
 #include <bluetooth/uuid.h>
 #include <bluetooth/gatt.h>
 #include <sys/byteorder.h>
+
+#include <bluetooth/services/auth_svc.h>
+
+#define PORT	DT_ALIAS_SW0_GPIOS_CONTROLLER
+
+/* change this to use another GPIO pin */
+#ifdef DT_ALIAS_SW0_GPIOS_PIN
+#define PIN     DT_ALIAS_SW0_GPIOS_PIN
+#else
+#error DT_ALIAS_SW0_GPIOS_PIN needs to be set in board.h
+#endif
+
+/* change to use another GPIO pin interrupt config */
+#ifdef DT_ALIAS_SW0_GPIOS_FLAGS
+#define EDGE    (DT_ALIAS_SW0_GPIOS_FLAGS | GPIO_INT_EDGE)
+#else
+/*
+ * If DT_ALIAS_SW0_GPIOS_FLAGS not defined used default EDGE value.
+ * Change this to use a different interrupt trigger
+ */
+#define EDGE    (GPIO_INT_EDGE | GPIO_INT_ACTIVE_LOW)
+#endif
+#define PULL_UP DT_ALIAS_SW0_GPIOS_FLAGS
 
 /**
  * Handy macro to spin forever
@@ -30,6 +55,16 @@ static struct bt_conn *default_conn;
 static struct bt_uuid_16 uuid = BT_UUID_INIT_16(0);
 static struct bt_gatt_discover_params discover_params;
 static struct bt_gatt_subscribe_params subscribe_params;
+
+/**
+ * Button callback struct
+ */
+static struct gpio_callback gpio_cb;
+
+/**
+ * Authentication connect struct
+ */
+static struct authenticate_conn auth_conn;
 
 /**
  *
@@ -71,6 +106,18 @@ static u8_t discover_func(struct bt_conn *conn,
     if (!attr) {
         printk("Discover complete\n");
         (void)memset(params, 0, sizeof(*params));
+
+        /**
+        * TODO:  If authenticating via L2CAP directly, then
+        * create a channel here.
+        * #if defined(CONFIG_BT_AUTH_L2CAP)
+        * #endif
+        */
+
+        //  Put all of the BLE attribute info into the struct authenticate_con
+        //auth_srv_set_bleinfo(struct authenticate_conn *auth_con, server_attr, client_attr);
+        //auth_error_t auth_svc_start(struct authenticate_conn *auth_con, attributes, conn);
+
         return BT_GATT_ITER_STOP;
     }
 
@@ -206,12 +253,7 @@ static bool bt_adv_data_found(struct bt_data *data, void *user_data)
                 default_conn = bt_conn_create_le(addr,
                                                  BT_LE_CONN_PARAM_DEFAULT);
 
-                /**
-                 * TODO:  If authenticating via L2CAP directly, then
-                 * create a channel here.
-                 * #if defined(CONFIG_BT_AUTH_L2CAP)
-                 * #endif
-                 */
+
                 return false;
             }
     }
@@ -273,11 +315,113 @@ static struct bt_conn_cb conn_callbacks = {
         .disconnected = disconnected,
 };
 
+static struct k_work ble_start_scan_work;
 
+/**
+ *
+ */
+static void ble_scan_work_func(struct k_work *work)
+{
+    printk("Starting BLE scanning\n");
+
+    /* start scanning */
+    int err = bt_le_scan_start(BT_LE_SCAN_ACTIVE, device_found);
+
+    if (err) {
+        printk("Scanning failed to start (err %d)\n", err);
+    }
+
+}
+
+/**
+ * Called when button is pressed, note called in interrupt context
+ *
+ * @param gpiob
+ * @param cb
+ * @param pins
+ */
+static void button_pressed(struct device *gpiob, struct gpio_callback *cb,
+                           u32_t pins)
+{
+    printk("Button pressed\n");
+
+    /* Since this function is called directly by the interrupt, start
+     * the BLE in a reguar thread context.  Create a work item which
+     * will start the BLE scanning
+     */
+    k_work_init(&ble_start_scan_work, ble_scan_work_func);
+
+    k_work_submit(&ble_start_scan_work);
+}
+
+/**
+ *
+ * @return
+ */
+static int init_button(void)
+{
+    struct device *gpiob;
+
+    gpiob = device_get_binding(PORT);
+    if (!gpiob) {
+        printk("Failed to get GPIO port: %s\n", PORT);
+        return -1;
+    }
+
+    gpio_pin_configure(gpiob, PIN,
+                       GPIO_DIR_IN | GPIO_INT |  PULL_UP | EDGE);
+
+    gpio_init_callback(&gpio_cb, button_pressed, BIT(PIN));
+
+    gpio_add_callback(gpiob, &gpio_cb);
+    gpio_pin_enable_callback(gpiob, PIN);
+
+    return 0;
+}
+
+static int tls_credential_add()
+{
+    /*
+     * TODO
+    int err = tls_credential_add(SERVER_CERTIFICATE_TAG,
+                                 TLS_CREDENTIAL_SERVER_CERTIFICATE,
+                                 server_certificate,
+                                 sizeof(server_certificate));
+
+    */
+
+    return -1;
+}
+
+
+static void auth_status(auth_status_t status, void *context);
+{
+    //
+    printk("Authentication process status: %d\n", status);
+}
 
 void main(void)
 {
+    struct auth_connection_params conn_params;
+
+    // TBD, not used just yet
+    memset(&conn_params, 0, sizeof(conn_params))
+
     printk("Central Auth started\n");
+
+    /**
+     * Add certificates to tls_credentls store
+     */
+    tls_credential_add();
+
+    auth_error_t auth_err;
+    err = auth_svc_init(auth_conn, &conn_params, auth_status, NULL, (AUTH_CONN_CENTRAL|AUTH_CONN_DTLS_AUTH_METHOD));
+
+    if(err != AUTH_SUCCESS)
+    {
+        printk("Failed to init authentication service.\n");
+        return;
+    }
 
     /**
      * @brief Enable the Bluetooth module.  Passing NULL to bt_enable
@@ -292,19 +436,11 @@ void main(void)
         SPIN_FOREVER;
     }
 
-
     /* Register connect/disconnect callbacks */
     bt_conn_cb_register(&conn_callbacks);
 
-    /* start scanning */
-    printk("Scanning started  started\n");
-    err = bt_le_scan_start(BT_LE_SCAN_ACTIVE, device_found);
-
-    if (err) {
-        printk("Scanning failed to start (err %d)\n", err);
-        SPIN_FOREVER;
-    }
-
+    /* Init button 1 to start scanning process */
+    init_button();
 
     /* just spin while the BT modules handle the connection and authentiation */
     SPIN_FOREVER;

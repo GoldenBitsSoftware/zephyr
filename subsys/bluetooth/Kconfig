@@ -85,6 +85,17 @@ config BT_OBSERVER
 
 endmenu
 
+menu "Central Authentication"
+	visible if !BT_PERIPHERAL
+
+config BT_CENTRAL_AUTHENTICATION
+	bool "Central Authentication Support"
+	default n
+	help
+	  Select this to enable the Central to authenticate with the peripheral.
+
+endmenu
+
 source "subsys/bluetooth/services/Kconfig"
 
 config BT_CONN
