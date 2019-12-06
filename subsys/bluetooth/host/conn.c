@@ -2532,3 +2532,13 @@ int bt_conn_init(void)
 
 	return 0;
 }
+
+void bt_conn_set_context(struct bt_conn *conn, void *context)
+{
+    conn->user_context = context;
+}
+
+void *bt_con_get_context(struct bt_conn *conn)
+{
+    return conn->user_context;
+}

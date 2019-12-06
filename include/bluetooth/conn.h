@@ -884,6 +884,25 @@ struct bt_conn *bt_conn_create_br(const bt_addr_t *peer,
  */
 struct bt_conn *bt_conn_create_sco(const bt_addr_t *peer);
 
+
+/** @brief Set user defined context for a connection object.
+ *
+ * @param conn     Connection object.
+ * @param context  User context.
+ *
+ * @return  Nothing.
+ */
+void bt_conn_set_context(struct bt_conn *conn, void *context);
+
+
+/** @brief  Get the user supplies context.
+ *
+ * @param conn  Connection object.
+ *
+ * @return  The context
+ */
+void *bt_con_get_context(struct bt_conn *conn);
+
 #ifdef __cplusplus
 }
 #endif

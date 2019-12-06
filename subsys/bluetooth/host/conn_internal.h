@@ -138,6 +138,9 @@ struct bt_conn {
 		struct bt_conn_sco	sco;
 #endif
 	};
+
+	/* user supplied context for connection */
+	 void *user_context;
 };
 
 /* Process incoming data for a connection */
