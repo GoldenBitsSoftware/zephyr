@@ -175,11 +175,11 @@ struct bt_uuid_128 {
 /** @def BT_UUID_AUTH_CLIENT
  *  @brief Characteristic used to handle DTLS exchange as a client (ie BLE Central)
  */
-#define BT_UUID_AUTH_SVC_CLIENT           BT_UUID_DECLARE_16(0x3015)
+#define BT_UUID_AUTH_SVC_CLIENT_CHAR      BT_UUID_DECLARE_16(0x3015)
 /** @def BT_UUID_AUTH_SERVER
  *  @brief Characteristic used to handle DTLS exchange as a server (ie BLE peripherial)
  */
-#define BT_UUID_AUTH_SVC_SERVER           BT_UUID_DECLARE_16(0x3016)
+#define BT_UUID_AUTH_SVC_SERVER_CHAR       BT_UUID_DECLARE_16(0x3016)
 /** @def BT_UUID_IPSS
  *  @brief IP Support Service
  */
