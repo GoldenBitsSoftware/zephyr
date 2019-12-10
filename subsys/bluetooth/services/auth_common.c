@@ -11,17 +11,17 @@
 #include <errno.h>
 #include <zephyr.h>
 #include <init.h>
+#include <stdint.h>
 
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/hci.h>
 #include <bluetooth/conn.h>
 #include <bluetooth/uuid.h>
 #include <bluetooth/gatt.h>
-#include <bluetooth/auth_svc.h>
+#include <bluetooth/services/auth_svc.h>
 
-#define LOG_LEVEL CONFIG_BT_GATT_AUTHS_LOG_LEVEL
 #include <logging/log.h>
-LOG_MODULE_REGISTER(auths);
+LOG_MODULE_DECLARE(AUTH_SERVICE_LOG_MODULE);
 
 
 #define HANDSHAKE_THRD_STACK_SIZE       1024
@@ -37,7 +37,11 @@ K_THREAD_STACK_DEFINE(auth_thread_stack_area_1, HANDSHAKE_THRD_STACK_SIZE);
 
 // forward declaration
 void auth_dtls_thead(void *arg1, void *arg2, void *arg3);
-static void challenge_response_auth_thead(void *arg1, void *arg2, void *arg3);
+
+/**
+ * TBD
+ *static void challenge_response_auth_thead(void *arg1, void *arg2, void *arg3);
+ */
 
 
 /* ========================== local functions ========================= */
@@ -50,11 +54,11 @@ static void challenge_response_auth_thead(void *arg1, void *arg2, void *arg3);
  * @param auth_con
  * @param status
  */
-void auth_internal_status_callback(struct authenticate_conn *auth_con , auth_status_t status)
+void auth_internal_status_callback(struct authenticate_conn *auth_conn, auth_status_t status)
 {
-    if(auth_con->status_cb_func)
+    if(auth_conn->status_cb_func)
     {
-        auth_con->status_cb_func(status, auth_con->callback_context);
+        auth_conn->status_cb_func(auth_conn, status, auth_conn->callback_context);
     }
 }
 
@@ -71,15 +75,15 @@ void auth_internal_status_callback(struct authenticate_conn *auth_con , auth_sta
 
 /* ========================= external API ============================ */
 
-
 auth_error_t auth_svc_init(struct authenticate_conn *auth_con, struct auth_connection_params *con_params,
                             k_auth_status_cb_t status_func, void *context, uint32_t auth_flags)
 {
     /* init the struct to zero */
     memset(auth_con, 0, sizeof(struct authenticate_conn));
 
-    // init mutex
+    // init mutexes
     k_sem_init(&auth_con->auth_sem, 1, 1);
+    k_sem_init(&auth_con->auth_indicate_sem, 0, 1);
 
     // setup the status callback
     auth_con->status_cb_func = status_func;
@@ -89,49 +93,52 @@ auth_error_t auth_svc_init(struct authenticate_conn *auth_con, struct auth_conne
 
     if(auth_flags & AUTH_CONN_USE_L2CAP)
     {
-        auth_con->use_gatt_attribute = false;
+        auth_con->use_gatt_attributes = false;
     }
     else
     {
-        auth_con->use_gatt_attribute = true;
+        auth_con->use_gatt_attributes = true;
     }
 
 
-    k_thread_entry_t auth_thread_func = NULL;
+
 
 #ifdef CONFIG_DTLS_AUTH_METHOD
-    auth_thread_func = auth_dtls_thead;
+    auth_con->auth_thread_func = auth_dtls_thead;
 
     // init TLS layer
     auth_init_dtls_method(auth_con)
 #endif
 
 #ifdef CONFIG_CHALLENGE_RESP_AUTH_METHOD
+    auth_con->auth_thread_func = NULL;
     return AUTH_ERROR_INVALID_PARAM;  // not implmeneted
 #endif
 
 
-    return 0
+    return 0;
 }
 
 
 
 // optional callback w/status
-auth_error_t auth_svc_start(struct authenticate_conn *auth_con, )
+auth_error_t auth_svc_start(struct authenticate_conn *auth_conn)
 {
 
     // TODO:  Get thread stack from stack pool?
 
     // Take the semaphore, give it back when auth completed
-    k_sem_take(&auth_con->auth_sem, K_NO_WAIT);
+    k_sem_take(&auth_conn->auth_sem, K_NO_WAIT);
 
-    auth_con->auth_tid = k_thread_create(&auth_con->auth_thrd_data, auth_thread_stack_area_1,
-                                              K_THREAD_STACK_SIZEOF(auth_thread_stack_area_1),
-                                              auth_thread_func, auth_con, NULL, NULL, HANDSHAKE_THRD_PRIORITY,
-                                              K_NO_WAIT);
+    auth_conn->auth_tid = k_thread_create(&auth_conn->auth_thrd_data, auth_thread_stack_area_1,
+                                          K_THREAD_STACK_SIZEOF(auth_thread_stack_area_1),
+                                          auth_conn->auth_thread_func, auth_conn, NULL, NULL, HANDSHAKE_THRD_PRIORITY,
+                                           0,  // options
+                                          K_NO_WAIT);
+
 
     // status callback
-    auth_status_callback(auth_con, AUTH_STARTED);
+    auth_internal_status_callback(auth_conn, AUTH_STAT_STARTED);
 
 
     return AUTH_SUCCESS;
@@ -172,6 +179,8 @@ auth_error_t auth_svc_wait(struct authenticate_conn *auth_con, uint32_t timeoutM
 
 
 
+#if 0
+TBD
 /**
  * If performing a simple challenge response
  * @param arg1
@@ -182,7 +191,10 @@ static void challenge_response_auth_thead(void *arg1, void *arg2, void *arg3)
 {
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)arg1;
 
+    (void)auth_conn;
+
     // if client start handshake
 
     // if server wait for connection response
 }
+#endif
