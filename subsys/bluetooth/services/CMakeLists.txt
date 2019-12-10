@@ -9,4 +9,10 @@ zephyr_sources_ifdef(CONFIG_BT_GATT_HRS hrs.c)
 
 zephyr_sources_ifdef(CONFIG_BT_GATT_AUTHS auth_svc.c auth_common.c auth_tls.c)
 
-zephyr_sources_ifdef(CONFIG_BT_CENTRAL_AUTHENTICATION auth_central.c auth_common.c auth_tls.c)
+zephyr_sources_ifdef(CONFIG_BT_CENTRAL_AUTHENTICATION auth_common.c auth_tls.c)
+
+# Is this the correct way to include Mbed tls module direcotry?
+if(CONFIG_MBEDTLS)
+    zephyr_include_directories($ENV{ZEPHYR_BASE}/../modules/crypto/mbedtls/include)
+    zephyr_include_directories($ENV{ZEPHYR_BASE}/../modules/crypto/mbedtls/configs)
+endif()
