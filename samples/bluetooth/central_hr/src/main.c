@@ -19,11 +19,83 @@
 #include <bluetooth/gatt.h>
 #include <sys/byteorder.h>
 
+#include <drivers/gpio.h>
+
 static struct bt_conn *default_conn;
 
 static struct bt_uuid_16 uuid = BT_UUID_INIT_16(0);
 static struct bt_gatt_discover_params discover_params;
 static struct bt_gatt_subscribe_params subscribe_params;
+
+
+// DAG DEBUG BEG
+
+#define PORT	DT_ALIAS_SW0_GPIOS_CONTROLLER
+
+/* change this to use another GPIO pin */
+#ifdef DT_ALIAS_SW0_GPIOS_PIN
+#define PIN     DT_ALIAS_SW0_GPIOS_PIN
+#else
+#error DT_ALIAS_SW0_GPIOS_PIN needs to be set in board.h
+#endif
+
+/* change to use another GPIO pin interrupt config */
+#ifdef DT_ALIAS_SW0_GPIOS_FLAGS
+#define EDGE    (DT_ALIAS_SW0_GPIOS_FLAGS | GPIO_INT_EDGE)
+#else
+/*
+ * If DT_ALIAS_SW0_GPIOS_FLAGS not defined used default EDGE value.
+ * Change this to use a different interrupt trigger
+ */
+#define EDGE    (GPIO_INT_EDGE | GPIO_INT_ACTIVE_LOW)
+#endif
+#define PULL_UP DT_ALIAS_SW0_GPIOS_FLAGS
+/**
+ * Button callback struct
+ */
+static struct gpio_callback gpio_cb;
+
+/**
+ * Called when button is pressed, note called in interrupt context
+ *
+ * @param gpiob
+ * @param cb
+ * @param pins
+ */
+static void button_pressed(struct device *gpiob, struct gpio_callback *cb,
+                           u32_t pins)
+{
+    printk("Button pressed\n");
+
+}
+
+/**
+ *
+ * @return
+ */
+static
+__attribute__((optimize("O0")))
+int init_button(void)
+{
+    struct device *gpiob;
+
+    gpiob = device_get_binding(PORT);
+    if (!gpiob) {
+        printk("Failed to get GPIO port: %s\n", PORT);
+        return -1;
+    }
+
+    gpio_pin_configure(gpiob, PIN,
+                       GPIO_DIR_IN | GPIO_INT |  PULL_UP | EDGE);
+
+    gpio_init_callback(&gpio_cb, button_pressed, BIT(PIN));
+
+    gpio_add_callback(gpiob, &gpio_cb);
+    gpio_pin_enable_callback(gpiob, PIN);
+
+    return 0;
+}
+// DAG DEBUG END
 
 static u8_t notify_func(struct bt_conn *conn,
 			   struct bt_gatt_subscribe_params *params,
@@ -36,6 +108,16 @@ static u8_t notify_func(struct bt_conn *conn,
 	}
 
 	printk("[NOTIFICATION] data %p length %u\n", data, length);
+
+	// DAG DEBUG BEG
+	// print out bytes
+	uint8_t *databytes = data;
+	for(int i = 0; i < length; i++, databytes++)
+    {
+	    printk("%02X ", *databytes);
+    }
+	printk("\n");
+	// DAG DEBUG END
 
 	return BT_GATT_ITER_CONTINUE;
 }
@@ -217,6 +299,8 @@ void main(void)
 		printk("Bluetooth init failed (err %d)\n", err);
 		return;
 	}
+
+    init_button();
 
 	printk("Bluetooth initialized\n");
 

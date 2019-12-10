@@ -65,6 +65,7 @@ static struct gpio_callback gpio_cb;
  * Authentication connect struct
  */
 static struct authenticate_conn auth_conn;
+//struct auth_connection_params conn_params;
 
 /**
  *
@@ -84,6 +85,8 @@ static u8_t notify_func(struct bt_conn *conn,
         return BT_GATT_ITER_STOP;
     }
 
+    /* Happens when client writes to client characteristic and then
+     * sets an Indication. */
     printk("[NOTIFICATION] data %p length %u\n", data, length);
 
     return BT_GATT_ITER_CONTINUE;
@@ -91,6 +94,7 @@ static u8_t notify_func(struct bt_conn *conn,
 
 /**
  * Characteristic discovery function
+ * TODO: Refactor, this seems a bit lame.
  *
  * @param conn
  * @param attr
@@ -106,58 +110,83 @@ static u8_t discover_func(struct bt_conn *conn,
     if (!attr) {
         printk("Discover complete\n");
         (void)memset(params, 0, sizeof(*params));
-
-        /**
-        * TODO:  If authenticating via L2CAP directly, then
-        * create a channel here.
-        * #if defined(CONFIG_BT_AUTH_L2CAP)
-        * #endif
-        */
-
-        //  Put all of the BLE attribute info into the struct authenticate_con
-        //auth_srv_set_bleinfo(struct authenticate_conn *auth_con, server_attr, client_attr);
-        //auth_error_t auth_svc_start(struct authenticate_conn *auth_con, attributes, conn);
-
         return BT_GATT_ITER_STOP;
     }
 
     printk("[ATTRIBUTE] handle %u\n", attr->handle);
 
-    if (!bt_uuid_cmp(discover_params.uuid, BT_UUID_HRS)) {
-        memcpy(&uuid, BT_UUID_HRS_MEASUREMENT, sizeof(uuid));
+    if (!bt_uuid_cmp(discover_params.uuid, BT_UUID_AUTH_SVC)) {
+
+        auth_conn.auth_svc_attr = attr;
+        memcpy(&uuid, BT_UUID_AUTH_SVC_CLIENT_CHAR, sizeof(uuid));
         discover_params.uuid = &uuid.uuid;
         discover_params.start_handle = attr->handle + 1;
         discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
 
+        /* Descover the BT_UUID_AUTH_SVC_CLIENT_CHAR */
         err = bt_gatt_discover(conn, &discover_params);
         if (err) {
             printk("Discover failed (err %d)\n", err);
         }
     } else if (!bt_uuid_cmp(discover_params.uuid,
-                            BT_UUID_HRS_MEASUREMENT)) {
-        memcpy(&uuid, BT_UUID_GATT_CCC, sizeof(uuid));
+                            BT_UUID_AUTH_SVC_CLIENT_CHAR)) {
+
+        /* if discovered characteristic */
+        if(discover_params.type == BT_GATT_DISCOVER_CHARACTERISTIC) {
+            auth_conn.auth_client_attr = attr;
+        } else if(discover_params.type == BT_GATT_DISCOVER_DESCRIPTOR) {
+
+            subscribe_params.notify = notify_func;
+            subscribe_params.value = BT_GATT_CCC_NOTIFY;
+            subscribe_params.ccc_handle = attr->handle;
+            subscribe_params.value_handle = bt_gatt_attr_value_handle(attr);
+
+            err = bt_gatt_subscribe(conn, &subscribe_params);
+            if (err && err != -EALREADY) {
+                printk("Subscribe failed (err %d)\n", err);
+            } else {
+                printk("[SUBSCRIBED]\n");
+            }
+
+            // start discovery of server characteristic
+            memcpy(&uuid, BT_UUID_AUTH_SVC_SERVER_CHAR, sizeof(uuid));
+            discover_params.uuid = &uuid.uuid;
+            discover_params.start_handle = attr->handle + 2;
+            discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
+
+
+            err = bt_gatt_discover(conn, &discover_params);
+            if (err) {
+                printk("Discover failed (err %d)\n", err);
+            }
+
+            return BT_GATT_ITER_STOP;
+        }
+
+        // now discover notification attrbute/handle
+        memcpy(&uuid, BT_UUID_AUTH_SVC_CLIENT_CHAR, sizeof(uuid));
         discover_params.uuid = &uuid.uuid;
         discover_params.start_handle = attr->handle + 2;
         discover_params.type = BT_GATT_DISCOVER_DESCRIPTOR;
-        subscribe_params.value_handle = bt_gatt_attr_value_handle(attr);
 
         err = bt_gatt_discover(conn, &discover_params);
         if (err) {
             printk("Discover failed (err %d)\n", err);
         }
-    } else {
-        subscribe_params.notify = notify_func;
-        subscribe_params.value = BT_GATT_CCC_NOTIFY;
-        subscribe_params.ccc_handle = attr->handle;
+    }
+    else if(!bt_uuid_cmp(discover_params.uuid,
+                         BT_UUID_AUTH_SVC_SERVER_CHAR)) {
 
-        err = bt_gatt_subscribe(conn, &subscribe_params);
-        if (err && err != -EALREADY) {
-            printk("Subscribe failed (err %d)\n", err);
-        } else {
-            printk("[SUBSCRIBED]\n");
+        // discovered server characeristic
+        auth_conn.auth_server_attr = attr;
+
+        /* Last characteristic discovered, now start authorization */
+        auth_error_t auth_err = auth_svc_start(&auth_conn);
+
+        if(auth_err != AUTH_SUCCESS) {
+            printk("Authorization start failed (err %d)\n", auth_err);
         }
 
-        return BT_GATT_ITER_STOP;
     }
 
     return BT_GATT_ITER_STOP;
@@ -184,12 +213,34 @@ static void connected(struct bt_conn *conn, u8_t conn_err)
     printk("Connected: %s\n", addr);
 
     if (conn == default_conn) {
-        memcpy(&uuid, BT_UUID_HRS, sizeof(uuid));
+
+        /* Save off the bt connection, also set the auth context
+         * into the bt connection for later use */
+        auth_conn.conn = conn;
+        bt_conn_set_context(conn, &auth_conn);
+
+        /* If connecting via L2CAP, no need to discover attibutes
+        * just connect via L2CAP layer */
+        if(!auth_conn.use_gatt_attributes) {
+
+            // start authentication service
+            auth_error_t err = auth_svc_start(&auth_conn);
+
+            if(err != AUTH_SUCCESS) {
+                printk("Failed to start L2CAP authentication, error: %d\n", err);
+            }
+
+            return;
+        }
+
+        // Else not using L2CAP, discover attributes
+        memcpy(&uuid, BT_UUID_AUTH_SVC, sizeof(uuid));
         discover_params.uuid = &uuid.uuid;
         discover_params.func = discover_func;
         discover_params.start_handle = 0x0001;
         discover_params.end_handle = 0xffff;
         discover_params.type = BT_GATT_DISCOVER_PRIMARY;
+
 
         /**
          * Discover characteristics for the service
@@ -394,7 +445,7 @@ static int tls_credential_add()
 }
 
 
-static void auth_status(auth_status_t status, void *context);
+static void auth_status(struct authenticate_conn *auth_conn, auth_status_t status, void *context)
 {
     //
     printk("Authentication process status: %d\n", status);
@@ -402,10 +453,11 @@ static void auth_status(auth_status_t status, void *context);
 
 void main(void)
 {
-    struct auth_connection_params conn_params;
+
+    struct auth_connection_params con_params = {0};
 
     // TBD, not used just yet
-    memset(&conn_params, 0, sizeof(conn_params))
+    memset(&auth_conn, 0, sizeof(auth_conn));
 
     printk("Central Auth started\n");
 
@@ -415,9 +467,10 @@ void main(void)
     tls_credential_add();
 
     auth_error_t auth_err;
-    err = auth_svc_init(auth_conn, &conn_params, auth_status, NULL, (AUTH_CONN_CENTRAL|AUTH_CONN_DTLS_AUTH_METHOD));
+    auth_err = auth_svc_init(&auth_conn, &con_params, auth_status, NULL, (AUTH_CONN_CENTRAL|AUTH_CONN_DTLS_AUTH_METHOD));
 
-    if(err != AUTH_SUCCESS)
+
+    if(auth_err != AUTH_SUCCESS)
     {
         printk("Failed to init authentication service.\n");
         return;
