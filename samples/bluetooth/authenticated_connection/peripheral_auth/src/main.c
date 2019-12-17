@@ -20,6 +20,8 @@
 #include <bluetooth/uuid.h>
 #include <bluetooth/gatt.h>
 
+#include <bluetooth/services/auth_svc.h>
+
 
 
 #if 0
@@ -33,6 +35,10 @@
 #endif
 
 struct bt_conn *default_conn;
+
+static bool is_connected = false;
+
+static struct authenticate_conn auth_conn;
 
 /**
  * Set up the advertising data
@@ -57,6 +63,16 @@ static void connected(struct bt_conn *conn, u8_t err)
         default_conn = bt_conn_ref(conn);
         printk("Connected\n");
 
+        auth_conn.conn = default_conn;
+
+        bt_conn_set_context(conn, &auth_conn);
+
+        /* After connecting, get the perpiheral GATT attributes */
+        auth_svc_get_peripheral_attributes(&auth_conn);
+
+        is_connected = true;
+
+
         // Start authentication??
 
         // is the service enumeration done by now?
@@ -68,6 +84,8 @@ static void connected(struct bt_conn *conn, u8_t err)
 static void disconnected(struct bt_conn *conn, u8_t reason)
 {
     printk("Disconnected (reason 0x%02x)\n", reason);
+
+    is_connected = false;
 
     if (default_conn) {
         bt_conn_unref(default_conn);
@@ -124,9 +142,29 @@ static void bt_ready(int err)
     printk("Advertising successfully started\n");
 }
 
+
+static void auth_status(struct authenticate_conn *auth_conn, auth_status_t status, void *context)
+{
+    //
+    printk("Authentication process status: %d\n", status);
+}
+
+
 void main(void)
 {
     int err;
+    uint8_t test_data[5] = {0xB, 0xE, 0xE, 0xF, 0x41};
+
+    struct auth_connection_params con_params = {0};
+
+    auth_error_t auth_err;
+    auth_err = auth_svc_init(&auth_conn, &con_params, auth_status, NULL, (AUTH_CONN_PERIPHERAL|AUTH_CONN_DTLS_AUTH_METHOD));
+
+    if(auth_err != AUTH_SUCCESS)
+    {
+        printk("Failed to init authentication service.\n");
+        return;
+    }
 
     err = bt_enable(bt_ready);
     if (err) {
@@ -142,6 +180,12 @@ void main(void)
 
     while(true)
     {
+        k_sleep(MSEC_PER_SEC * 5);
+
         // loop forever
+        if(is_connected) {
+            printk("Sending test data.\n");
+            auth_svc_peripheral_tx(&auth_conn, test_data, sizeof(test_data));
+        }
     }
 }
