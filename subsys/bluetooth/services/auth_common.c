@@ -7,6 +7,7 @@
 
 #include <zephyr/types.h>
 #include <stddef.h>
+#include <stdbool.h>
 #include <string.h>
 #include <errno.h>
 #include <zephyr.h>
@@ -37,11 +38,8 @@ K_THREAD_STACK_DEFINE(auth_thread_stack_area_1, HANDSHAKE_THRD_STACK_SIZE);
 
 // forward declaration
 void auth_dtls_thead(void *arg1, void *arg2, void *arg3);
+void auth_looback_thread(void *arg1, void *arg2, void *arg3);
 
-/**
- * TBD
- *static void challenge_response_auth_thead(void *arg1, void *arg2, void *arg3);
- */
 
 
 /* ========================== local functions ========================= */
@@ -75,15 +73,16 @@ void auth_internal_status_callback(struct authenticate_conn *auth_conn, auth_sta
 
 /* ========================= external API ============================ */
 
-auth_error_t auth_svc_init(struct authenticate_conn *auth_con, struct auth_connection_params *con_params,
+int auth_svc_init(struct authenticate_conn *auth_con, struct auth_connection_params *con_params,
                             k_auth_status_cb_t status_func, void *context, uint32_t auth_flags)
 {
     /* init the struct to zero */
     memset(auth_con, 0, sizeof(struct authenticate_conn));
 
     // init mutexes
-    k_sem_init(&auth_con->auth_sem, 1, 1);
+    k_sem_init(&auth_con->auth_handshake_sem, 0, 1);
     k_sem_init(&auth_con->auth_indicate_sem, 0, 1);
+    k_sem_init(&auth_con->auth_io_sem, 0, 1);
 
     // setup the status callback
     auth_con->status_cb_func = status_func;
@@ -115,21 +114,21 @@ auth_error_t auth_svc_init(struct authenticate_conn *auth_con, struct auth_conne
     return AUTH_ERROR_INVALID_PARAM;  // not implmeneted
 #endif
 
+#ifdef CONFIG_LOOPBACK_TEST
+    auth_con->auth_thread_func = auth_looback_thread;
+#endif
 
-    return 0;
+
+    return AUTH_SUCCESS;
 }
 
 
 
 // optional callback w/status
-auth_error_t auth_svc_start(struct authenticate_conn *auth_conn)
+int auth_svc_start(struct authenticate_conn *auth_conn)
 {
 
     // TODO:  Get thread stack from stack pool?
-
-    // Take the semaphore, give it back when auth completed
-    k_sem_take(&auth_conn->auth_sem, K_NO_WAIT);
-
     auth_conn->auth_tid = k_thread_create(&auth_conn->auth_thrd_data, auth_thread_stack_area_1,
                                           K_THREAD_STACK_SIZEOF(auth_thread_stack_area_1),
                                           auth_conn->auth_thread_func, auth_conn, NULL, NULL, HANDSHAKE_THRD_PRIORITY,
@@ -151,7 +150,7 @@ auth_error_t auth_svc_start(struct authenticate_conn *auth_conn)
  * @param timeoutMsec
  * @return
  */
-auth_error_t auth_svc_wait(struct authenticate_conn *auth_con, uint32_t timeoutMsec, auth_status_t *status)
+int auth_svc_wait(struct authenticate_conn *auth_con, uint32_t timeoutMsec, auth_status_t *status)
 {
     int ret;
 
@@ -161,12 +160,12 @@ auth_error_t auth_svc_wait(struct authenticate_conn *auth_con, uint32_t timeoutM
         return AUTH_ERROR_INVALID_PARAM;
     }
 
-    ret = k_sem_take(&auth_con->auth_sem, timeoutMsec);
+    ret = k_sem_take(&auth_con->auth_handshake_sem, timeoutMsec);
 
     /* Auth process has completed, return success */
     if(ret == 0)
     {
-        k_sem_give(&auth_con->auth_sem);
+        k_sem_give(&auth_con->auth_handshake_sem);
         *status = auth_con->curr_status;
         return AUTH_SUCCESS;
     }
@@ -178,23 +177,193 @@ auth_error_t auth_svc_wait(struct authenticate_conn *auth_con, uint32_t timeoutM
 }
 
 
+/* Routines to handle buffer io */
 
-#if 0
-TBD
 /**
- * If performing a simple challenge response
- * @param arg1
- * @param arg2
- * @param arg3
+ *
+ * @param iobuf
+ * @return
  */
-static void challenge_response_auth_thead(void *arg1, void *arg2, void *arg3)
+int auth_svc_buffer_init(struct auth_io_buffer *iobuf)
 {
-    struct authenticate_conn *auth_conn = (struct authenticate_conn *)arg1;
+    /* init mutex*/
+    k_mutex_init(&iobuf->buf_mutex);
 
-    (void)auth_conn;
+    iobuf->head_index = 0;
+    iobuf->tail_index = 0;
+    iobuf->num_valid_bytes = 0;
 
-    // if client start handshake
-
-    // if server wait for connection response
+    return AUTH_SUCCESS;
 }
-#endif
+
+/**
+ *
+ */
+int auth_svc_buffer_put(struct auth_io_buffer *iobuf, const uint8_t *in_buf,  int num_bytes)
+{
+    // Is the buffer full?
+    if(iobuf->num_valid_bytes == AUTH_SVC_IOBUF_LEN) {
+        return AUTH_ERROR_IOBUFF_FULL;
+    }
+
+    /* lock mutex */
+    int err = k_mutex_lock(&iobuf->buf_mutex, K_FOREVER);
+    if(err) {
+        return err;
+    }
+
+    uint32_t free_space = AUTH_SVC_IOBUF_LEN - iobuf->num_valid_bytes;
+    uint32_t copy_cnt = MIN(free_space, num_bytes);
+    uint32_t total_copied = 0;
+    uint32_t byte_cnt;
+
+    if(iobuf->head_index < iobuf->tail_index) {
+        // only enough room from head to tail, don't over-write
+        uint32_t max_copy_cnt = iobuf->tail_index - iobuf->head_index;
+
+        copy_cnt = MIN(max_copy_cnt, copy_cnt);
+
+        memcpy(iobuf->io_buffer + iobuf->head_index, in_buf, copy_cnt);
+
+        total_copied += copy_cnt;
+        iobuf->head_index += copy_cnt;
+        iobuf->num_valid_bytes += copy_cnt;
+
+    } else {
+
+        // copy from head to end of buffer
+        byte_cnt = AUTH_SVC_IOBUF_LEN - iobuf->head_index;
+
+        if(byte_cnt > copy_cnt) {
+            byte_cnt = copy_cnt;
+        }
+
+        memcpy(iobuf->io_buffer + iobuf->head_index, in_buf, byte_cnt);
+
+        total_copied += byte_cnt;
+        in_buf += byte_cnt;
+        copy_cnt -= byte_cnt;
+        iobuf->head_index += byte_cnt;
+
+        iobuf->num_valid_bytes += byte_cnt;
+
+        // if wrapped, then copy from beginning of buffer
+        if(copy_cnt > 0) {
+            memcpy(iobuf->io_buffer, in_buf, copy_cnt);
+
+            total_copied += copy_cnt;
+            iobuf->num_valid_bytes += copy_cnt;
+            iobuf->head_index = copy_cnt;
+        }
+    }
+
+    /* unlock */
+    k_mutex_unlock(&iobuf->buf_mutex);
+
+    return (int)total_copied;
+}
+
+
+int auth_svc_buffer_get(struct auth_io_buffer *iobuf, uint8_t *out_buf,  int num_bytes)
+{
+    // if no valid bytes, just return zero
+    if(iobuf->num_valid_bytes == 0) {
+        return 0;
+    }
+
+    /* lock mutex */
+    int err = k_mutex_lock(&iobuf->buf_mutex, K_FOREVER);
+    if(err) {
+        return err;
+    }
+
+    // number bytes to copy
+    uint32_t copy_cnt = MIN(iobuf->num_valid_bytes, num_bytes);
+    uint32_t total_copied = 0;
+    uint32_t byte_cnt = 0;
+
+    if(iobuf->head_index <= iobuf->tail_index) {
+        // how may bytes are available
+        byte_cnt = AUTH_SVC_IOBUF_LEN - iobuf->tail_index;
+
+        if(byte_cnt > copy_cnt) {
+            byte_cnt = copy_cnt;
+        }
+
+        // copy from tail to end of buffer
+        memcpy(out_buf, iobuf->io_buffer + iobuf->tail_index, byte_cnt);
+
+        // update tail index
+        iobuf->tail_index += byte_cnt;
+        out_buf += byte_cnt;
+        total_copied += byte_cnt;
+
+        // update copy count and num valid bytes
+        copy_cnt -= byte_cnt;
+        iobuf->num_valid_bytes -= byte_cnt;
+
+        // wrapped around, copy from beginning of buffer until
+        // copy_count is satisfied
+        if(copy_cnt > 0) {
+            memcpy(out_buf, iobuf->io_buffer, copy_cnt);
+
+            iobuf->tail_index = copy_cnt;
+            iobuf->num_valid_bytes -= copy_cnt;
+            total_copied += copy_cnt;
+        }
+
+    } else if(iobuf->head_index > iobuf->tail_index) {
+
+        byte_cnt = iobuf->head_index - iobuf->tail_index;
+
+        if(byte_cnt > copy_cnt) {
+            byte_cnt = copy_cnt;
+        }
+
+        memcpy(out_buf, iobuf->io_buffer + iobuf->tail_index, byte_cnt);
+
+        total_copied += byte_cnt;
+        copy_cnt -= byte_cnt;
+        iobuf->tail_index += byte_cnt;
+        iobuf->num_valid_bytes -= byte_cnt;
+    }
+
+    /* unlock */
+    k_mutex_unlock(&iobuf->buf_mutex);
+
+    return (int)total_copied;
+}
+
+int auth_svc_buffer_bytecount(struct auth_io_buffer *iobuf)
+{
+    int err = k_mutex_lock(&iobuf->buf_mutex, K_FOREVER);
+
+    if(!err) {
+        err = (int)iobuf->num_valid_bytes;
+    }
+
+    /* unlock */
+    k_mutex_unlock(&iobuf->buf_mutex);
+
+    return err;
+}
+
+bool auth_svc_buffer_isfull(struct auth_io_buffer *iobuf)
+{
+    return (auth_svc_buffer_bytecount(iobuf) == AUTH_SVC_IOBUF_LEN) ? true : false;
+}
+
+int auth_svc_buffer_clear(struct auth_io_buffer *iobuf) {
+
+    int err = k_mutex_lock(&iobuf->buf_mutex, K_FOREVER);
+
+    if(!err) {
+        iobuf->num_valid_bytes = 0;
+        iobuf->head_index = 0;
+        iobuf->tail_index = 0;
+    }
+
+    return err;
+}
+
+

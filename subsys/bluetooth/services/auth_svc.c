@@ -24,73 +24,148 @@ LOG_MODULE_REGISTER(AUTH_SERVICE_LOG_MODULE);
 #include <bluetooth/services/auth_svc.h>
 
 
-static u8_t server_update;
-
-uint8_t client_tx_buffer[10];
-
-
 /**
  * Called when Central receives data from the peripheral
  */
-u8_t *auth_svc_gatt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
+u8_t auth_svc_gatt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
                                    const void *data, u16_t length)
 {
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)bt_con_get_context(conn);
 
-    if(auth_conn == NULL)
-    {
-        return NULL;
+    if(auth_conn == NULL) {
+        /* TODO: Log an error */
+        return BT_GATT_ITER_CONTINUE;
     }
 
-    // TODO:  Fill up server rx buffer
-    //        Need to lock access to it.
-    //       server_input_buffer
+    printk("** num bytes received: %d\n", length);
 
-    return NULL;
+    /* This happens when the connection is dropped */
+    if(length == 0) {
+        /* TODO: signal input buff is ready */
+        return BT_GATT_ITER_CONTINUE;
+    }
+
+    int numbytes = auth_svc_buffer_put(&auth_conn->rx_buf, data, length);
+
+    /* signal semaphore */
+    k_sem_give(&auth_conn->auth_indicate_sem);
+
+    if((numbytes < 0) || (numbytes != length)) {
+        /* log an error */
+        LOG_ERR("Failed to set all received bytes, err: %d\n", numbytes);
+        return BT_GATT_ITER_CONTINUE;
+    }
+
+    return BT_GATT_ITER_CONTINUE;
 }
-
-
-
-
-int auth_svc_central_tx(void *ctx, const unsigned char *buf, size_t len)
-{
-    struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
-    int ret = 0;
-
-    (void)ret;
-    (void)auth_conn;
-
-    //central write:
-    //bt_gatt_write(
-
-
-    return ret;
-}
-
 
 
 int auth_svc_central_recv(void *ctx, unsigned char *buf, size_t len)
 {
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
 
-    (void)auth_conn;
+    /* check if input buffer has the data we want */
+    if(auth_svc_buffer_bytecount(&auth_conn->rx_buf) > 0) {
 
-    // TODO:  Lock access to server/peripheral input buffer
-    ///       Is buffer ready to forward up the Mbed TLS stack?
+        /* copy bytes, returns the number of bytes actually copied */
+        return auth_svc_buffer_get(&auth_conn->rx_buf, buf,  len);
+    }
 
-    //central getting notification of data from periph
-    //central read:
-    //bt_gatt_subscribe(callack)
-
-    return -1;
+    /* no bytes avail */
+    return 0;
 }
 
 
 int auth_svc_central_recv_timeout(void *ctx, unsigned char *buf, size_t len, uint32_t timeout)
 {
-    // TODO
+    int err = 0;
+    struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
+
+    /* check byte count */
+    while(true) {
+
+        if(auth_svc_buffer_bytecount(&auth_conn->rx_buf) != 0) {
+
+            /* copy bytes */
+            return auth_svc_central_recv(ctx, buf, len);
+        }
+
+        /* Wait on semaphore, but reset first since the Indicate function
+         * may have previously given the semaphore. Note there is a slight
+         * race condition where before k_sem_reset() is called, the semaphore
+         * is given by auth_svc_gatt_central_notify().  That's OK as this code
+         * check if the buffer has been filled, even on a time out. */
+        k_sem_reset(&auth_conn->auth_indicate_sem);
+        err = k_sem_take(&auth_conn->auth_indicate_sem, K_MSEC(timeout));
+
+        /* check if data was written regardless of an error or timeout. */
+        if(auth_svc_buffer_bytecount(&auth_conn->rx_buf) != 0) {
+
+            /* copy bytes */
+            return auth_svc_central_recv(ctx, buf, len);
+        }
+
+        /* timed out or error*/
+        if(err) {
+            return err;
+        }
+    }
+
     return -1;
 }
+
+static void gatt_write_cb(struct bt_conn *conn, u8_t err, struct bt_gatt_write_params *params)
+{
+    struct authenticate_conn *auth_conn = (struct authenticate_conn *)bt_con_get_context(conn);
+
+    if(err) {
+        LOG_ERR("gatt write failed, err: %d\n", err);
+    } else {
+        LOG_INF("gatt write success.\n");
+    }
+
+    k_sem_give(&auth_conn->auth_io_sem);
+}
+
+int auth_svc_central_tx(void *ctx, const unsigned char *buf, size_t len)
+{
+    struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
+    int err = 0;
+    u16_t write_count;
+    int total_write_cnt = 0;
+    struct bt_gatt_write_params write_params;
+
+    write_params.func   = gatt_write_cb;
+    write_params.handle = auth_conn->server_char_handle;
+    write_params.offset = 0;
+
+
+    /* if necessary break up the write */
+    while(len != 0) {
+
+        write_count = MIN(auth_conn->mtu, len);
+
+        write_params.data = buf;
+        write_params.length = write_count;
+
+        bt_gatt_write(auth_conn->conn, &write_params);
+
+        /* wait on semaphore for write completion */
+        err = k_sem_take(&auth_conn->auth_io_sem, K_MSEC(3000));
+
+        if(err) {
+            LOG_ERR("Failed to take semaphore, err: %d\n", err);
+            break;
+        }
+
+        total_write_cnt += write_count;
+        buf += write_count;
+        len -= write_count;
+    }
+
+    return total_write_cnt;
+}
+
 
 
 /**
@@ -101,7 +176,7 @@ int auth_svc_central_recv_timeout(void *ctx, unsigned char *buf, size_t len, uin
  * @param attr
  * @param err
  */
-static void auth_svc_central_indicate(struct bt_conn *conn,
+static void auth_svc_peripheral_indicate(struct bt_conn *conn,
                                                const struct bt_gatt_attr *attr,
                                                u8_t err)
 {
@@ -127,7 +202,6 @@ int auth_svc_peripheral_tx(void *ctx, const unsigned char *buf, size_t len)
     /* Setup the indicate params.  The client will use BLE indications vs.
      * notifications.  This enables the client to know when the central has
      * read the attribute and send another packet of data. */
-
     struct bt_gatt_indicate_params indicate_params;
 
 
@@ -142,7 +216,7 @@ int auth_svc_peripheral_tx(void *ctx, const unsigned char *buf, size_t len)
 
         //indicate_params.uuid ??
         indicate_params.attr = auth_conn->auth_client_attr;
-        indicate_params.func = auth_svc_central_indicate;
+        indicate_params.func = auth_svc_peripheral_indicate;
         indicate_params.data = buf;
         indicate_params.len = send_cnt;  /* bytes to send */
 
@@ -209,25 +283,6 @@ static void client_ccc_cfg_changed(const struct bt_gatt_attr *attr, u16_t value)
 }
 
 
-/**
- *
- * @param conn
- * @param attr
- * @param buf
- * @param len
- * @param offset
- * @return
- */
-static ssize_t client_read(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-                         void *buf, u16_t len, u16_t offset)
-{
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, &client_tx_buffer,
-                             sizeof(client_tx_buffer));
-}
-
-
-
-
 
 /**
  * Write from client
@@ -248,12 +303,10 @@ static ssize_t client_write(struct bt_conn *conn, const struct bt_gatt_attr *att
 
     u8_t *value = attr->user_data;
 
-    if (offset + len > sizeof(auth_conn->central_rx_buf)) {
-        return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
-    }
+    (void)auth_conn;
+     (void)value;
 
-    memcpy(value + offset, buf, len);
-    server_update = 1U;
+    /* TODO: Need to figure out how this works. */
 
     return len;
 }
@@ -271,10 +324,10 @@ BT_GATT_SERVICE_DEFINE(auth_svc,
         BT_GATT_PRIMARY_SERVICE(BT_UUID_AUTH_SVC),
 
         /**
-         *    Central (client role) bt_gatt_write()  ---> client characteristic --> Peripheral (server role)
+         *    Central (client role) bt_gatt_write()  ---> server characteristic --> bt_gatt_read() Peripheral (server role)
          *
-         *                Central    <---  Notification  <--- Peripheral
-         *        Central   bt_gatt_read() <----------- Peripheral
+         *                Central    <---  Notification (client characteristic)  <--- Peripheral
+         *
          */
 
         /**
@@ -282,8 +335,8 @@ BT_GATT_SERVICE_DEFINE(auth_svc,
          * to the central (client role).  The peripheral needs to alert the central a message is
          * ready to be read.
          */
-        BT_GATT_CHARACTERISTIC(BT_UUID_AUTH_SVC_CLIENT_CHAR, BT_GATT_CHRC_WRITE|BT_GATT_CHRC_INDICATE,
-                               BT_GATT_PERM_READ, client_read, NULL, NULL),
+        BT_GATT_CHARACTERISTIC(BT_UUID_AUTH_SVC_CLIENT_CHAR, BT_GATT_CHRC_INDICATE,
+                                   (BT_GATT_PERM_READ|BT_GATT_PERM_WRITE), NULL, NULL, NULL),
         BT_GATT_CCC(client_ccc_cfg_changed,
                     BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
@@ -295,3 +348,20 @@ BT_GATT_SERVICE_DEFINE(auth_svc,
                                BT_GATT_PERM_READ, NULL, client_write, server_input_buffer),
 
 );
+
+/**
+*
+* @return
+ */
+int auth_svc_get_peripheral_attributes(struct authenticate_conn *auth_con)
+{
+    auth_con->auth_svc_attr = &auth_svc.attrs[0];
+
+    auth_con->auth_client_attr = &auth_svc.attrs[1];
+
+    auth_con->auth_server_attr = &auth_svc.attrs[2];
+
+    return AUTH_SUCCESS;
+}
+
+
