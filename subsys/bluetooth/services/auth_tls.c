@@ -142,7 +142,7 @@ static void auth_mbed_debug(void *ctx, int level, const char *file,
  * @param auth_conn
  * @return
  */
-auth_error_t auth_init_dtls_method(struct authenticate_conn *auth_conn)
+int auth_init_dtls_method(struct authenticate_conn *auth_conn)
 {
     struct mbed_tls_context *mbed_ctx;
     int ret;
@@ -202,7 +202,7 @@ auth_error_t auth_init_dtls_method(struct authenticate_conn *auth_conn)
         if(auth_conn->use_gatt_attributes)
         {
             send_func         = auth_svc_peripheral_tx;
-            recv_func         = auth_src_peripheral_recv;
+            recv_func         = auth_svc_peripheral_recv;
             recv_timeout_func = auth_svc_peripheral_recv_timeout;
         }
         else
@@ -291,7 +291,7 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3)
 
     // give semaphore, any threads waiting for handshake to complete will be
     // woken up.
-    k_sem_give(&auth_conn->auth_sem);
+    k_sem_give(&auth_conn->auth_handshake_sem);
 
 }
 
