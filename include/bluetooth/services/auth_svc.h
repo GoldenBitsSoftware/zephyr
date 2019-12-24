@@ -75,6 +75,7 @@ extern "C" {
 
  struct auth_io_buffer {
     struct k_mutex buf_mutex;
+    struct k_sem buf_sem;
 
     uint32_t head_index;
     uint32_t tail_index;
@@ -119,8 +120,8 @@ struct authenticate_conn
     // semaphore to optionally wait on handshake completion
     struct k_sem auth_handshake_sem;
 
-    /* Semaphore used when waiting for write (for central) and read (for peripheral)*/
-    struct k_sem auth_io_sem;
+    /* Semaphore used when waiting for write (for central) to complete */
+    struct k_sem auth_central_write_sem;
 
     /* Semaphore used when processing peripheral indications */
     struct k_sem auth_indicate_sem;
@@ -218,6 +219,7 @@ int auth_svc_recv_over_l2cap_timeout(void *ctx, unsigned char *buf,
 int auth_svc_buffer_init(struct auth_io_buffer *iobuf);
 int auth_svc_buffer_put(struct auth_io_buffer *iobuf, const uint8_t *in_buf,  int num_bytes);
 int auth_svc_buffer_get(struct auth_io_buffer *iobuf, uint8_t *out_buf,  int num_bytes);
+int auth_svc_buffer_get_wait(struct auth_io_buffer *iobuf, uint8_t *out_buf,  int num_bytes, int waitmsec);
 int auth_svc_buffer_bytecount(struct auth_io_buffer *iobuf);
 bool auth_svc_buffer_isfull(struct auth_io_buffer *iobuf);
 int auth_svc_buffer_clear(struct auth_io_buffer *iobuf);
