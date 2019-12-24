@@ -31,16 +31,16 @@ LOG_MODULE_DECLARE(AUTH_SERVICE_LOG_MODULE);
 
 static int auth_central_tx(struct authenticate_conn *conn, uint8_t *data, size_t len)
 {
-    int err = 0;
+    int numbytes_err = 0;  /* num bytes written if > 0, else error */
 
     if(conn->use_gatt_attributes) {
-        err = auth_svc_central_tx(conn, data, len);
+        numbytes_err = auth_svc_central_tx(conn, data, len);
     } else {
         /* use L2CAP layer */
-        err = auth_svc_tx_l2cap(conn, data, len);
+        numbytes_err = auth_svc_tx_l2cap(conn, data, len);
     }
 
-    return err;
+    return numbytes_err;
 }
 
 static int auth_central_rx(struct authenticate_conn *conn, uint8_t *buf, size_t rxbytes)
@@ -100,6 +100,7 @@ static int auth_periph_rx(struct authenticate_conn *conn, uint8_t *buf, size_t l
 void auth_looback_thread(void *arg1, void *arg2, void *arg3)
 {
     int err;
+    int numbytes;
     uint32_t test_len = 10;
     uint8_t test_data[TEST_DATA_LEN];
     uint8_t recv_test_data[TEST_DATA_LEN];
@@ -110,9 +111,11 @@ void auth_looback_thread(void *arg1, void *arg2, void *arg3)
 
     if(auth_conn->is_central) {
 
-        err = auth_central_tx(auth_conn, test_data, test_len);
-        if(err) {
-            printk("Central: failed initial send to peripheral, err: %d.\n", err);
+        numbytes = auth_central_tx(auth_conn, test_data, test_len);
+        if(numbytes < 0) {
+            printk("Central: failed initial send to peripheral, err: %d.\n", numbytes);
+        } else {
+            printk("Central: wrote %d bytes.\n", numbytes);
         }
     }
 
@@ -122,9 +125,9 @@ void auth_looback_thread(void *arg1, void *arg2, void *arg3)
          if(auth_conn->is_central) {
 
              // wait for echo back from peripheral
-             err = auth_central_rx(auth_conn, recv_test_data, test_len);
-             if(err) {
-                printk("Central: failed receive from peripheral, err: %d.\n", err);
+             numbytes = auth_central_rx(auth_conn, recv_test_data, test_len);
+             if(err < 0) {
+                printk("Central: failed receive from peripheral, err: %d.\n", numbytes);
              }
 
 
@@ -143,8 +146,10 @@ void auth_looback_thread(void *arg1, void *arg2, void *arg3)
 
              // send packet again
              err = auth_central_tx(auth_conn, test_data, test_len);
-             if(err) {
+             if(err < 0) {
                  printk("Central: failed to send, err: %d\n", err);
+             } else {
+                printk("Central: wrote %d bytes.\n", numbytes);
              }
 
 
