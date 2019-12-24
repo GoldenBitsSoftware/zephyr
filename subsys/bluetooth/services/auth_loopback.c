@@ -128,7 +128,7 @@ void auth_looback_thread(void *arg1, void *arg2, void *arg3)
 
              // wait for echo back from peripheral
              numbytes = auth_central_rx(auth_conn, recv_test_data, test_len);
-             if(err < 0) {
+             if(numbytes < 0) {
                 printk("Central: failed receive from peripheral, err: %d.\n", numbytes);
              }
 
