@@ -24,6 +24,9 @@ LOG_MODULE_REGISTER(AUTH_SERVICE_LOG_MODULE);
 #include <bluetooth/services/auth_svc.h>
 
 
+
+#if defined(CONFIG_BT_GATT_CLIENT)
+
 /**
  * Called when Central receives data from the peripheral
  */
@@ -47,8 +50,6 @@ u8_t auth_svc_gatt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe
 
     int numbytes = auth_svc_buffer_put(&auth_conn->rx_buf, data, length);
 
-    /* signal semaphore */
-    k_sem_give(&auth_conn->auth_indicate_sem);
 
     if((numbytes < 0) || (numbytes != length)) {
         /* log an error */
@@ -64,57 +65,24 @@ int auth_svc_central_recv(void *ctx, unsigned char *buf, size_t len)
 {
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
 
-    /* check if input buffer has the data we want */
-    if(auth_svc_buffer_bytecount(&auth_conn->rx_buf) > 0) {
+    /* copy bytes, returns the number of bytes actually copied */
+    int err = auth_svc_buffer_get(&auth_conn->rx_buf, buf,  len);
 
-        /* copy bytes, returns the number of bytes actually copied */
-        return auth_svc_buffer_get(&auth_conn->rx_buf, buf,  len);
-    }
-
-    /* no bytes avail */
-    return 0;
+    return err;
 }
 
 
-int auth_svc_central_recv_timeout(void *ctx, unsigned char *buf, size_t len, uint32_t timeout)
+int auth_svc_central_recv_timeout(void *ctx, unsigned char *buf, size_t len, uint32_t timeout_msec)
 {
     int err = 0;
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
 
-    /* check byte count */
-    while(true) {
+    err = auth_svc_buffer_get_wait(&auth_conn->rx_buf, buf, len, timeout_msec);
 
-        if(auth_svc_buffer_bytecount(&auth_conn->rx_buf) != 0) {
-
-            /* copy bytes */
-            return auth_svc_central_recv(ctx, buf, len);
-        }
-
-        /* Wait on semaphore, but reset first since the Indicate function
-         * may have previously given the semaphore. Note there is a slight
-         * race condition where before k_sem_reset() is called, the semaphore
-         * is given by auth_svc_gatt_central_notify().  That's OK as this code
-         * check if the buffer has been filled, even on a time out. */
-        k_sem_reset(&auth_conn->auth_indicate_sem);
-        err = k_sem_take(&auth_conn->auth_indicate_sem, K_MSEC(timeout));
-
-        /* check if data was written regardless of an error or timeout. */
-        if(auth_svc_buffer_bytecount(&auth_conn->rx_buf) != 0) {
-
-            /* copy bytes */
-            return auth_svc_central_recv(ctx, buf, len);
-        }
-
-        /* timed out or error*/
-        if(err) {
-            return err;
-        }
-    }
-
-    return -1;
+    return err;
 }
 
-static void gatt_write_cb(struct bt_conn *conn, u8_t err, struct bt_gatt_write_params *params)
+static void gatt_central_write_cb(struct bt_conn *conn, u8_t err, struct bt_gatt_write_params *params)
 {
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)bt_con_get_context(conn);
 
@@ -124,7 +92,7 @@ static void gatt_write_cb(struct bt_conn *conn, u8_t err, struct bt_gatt_write_p
         LOG_INF("gatt write success.\n");
     }
 
-    k_sem_give(&auth_conn->auth_io_sem);
+    k_sem_give(&auth_conn->auth_central_write_sem);
 }
 
 int auth_svc_central_tx(void *ctx, const unsigned char *buf, size_t len)
@@ -135,7 +103,7 @@ int auth_svc_central_tx(void *ctx, const unsigned char *buf, size_t len)
     int total_write_cnt = 0;
     struct bt_gatt_write_params write_params;
 
-    write_params.func   = gatt_write_cb;
+    write_params.func   = gatt_central_write_cb;
     write_params.handle = auth_conn->server_char_handle;
     write_params.offset = 0;
 
@@ -151,7 +119,7 @@ int auth_svc_central_tx(void *ctx, const unsigned char *buf, size_t len)
         bt_gatt_write(auth_conn->conn, &write_params);
 
         /* wait on semaphore for write completion */
-        err = k_sem_take(&auth_conn->auth_io_sem, K_MSEC(3000));
+        err = k_sem_take(&auth_conn->auth_central_write_sem, K_MSEC(3000));
 
         if(err) {
             LOG_ERR("Failed to take semaphore, err: %d\n", err);
@@ -166,7 +134,7 @@ int auth_svc_central_tx(void *ctx, const unsigned char *buf, size_t len)
     return total_write_cnt;
 }
 
-
+#endif  /* CONFIG_BT_GATT_CLIENT */
 
 /**
  * Called when central has ACK'd receiving data
@@ -249,27 +217,22 @@ int auth_svc_peripheral_tx(void *ctx, const unsigned char *buf, size_t len)
 }
 
 
-int auth_svc_peripheral_recv(void *ctx,unsigned char *buf, size_t len)
-{
-    struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
-
-    (void)auth_conn;
-    //bt_gatt_read()
-
-    return -1;
-}
-
-
 int auth_svc_peripheral_recv_timeout(void *ctx, unsigned char *buf, size_t len, uint32_t timeout)
 {
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
 
-    (void)auth_conn;
+    int err = auth_svc_buffer_get_wait(&auth_conn->rx_buf, buf,  len, timeout);
 
-
-    //bt_gatt_read()
-    return -1;
+    return err;
 }
+
+int auth_svc_peripheral_recv(void *ctx,unsigned char *buf, size_t len)
+{
+    int err = auth_svc_peripheral_recv_timeout(ctx, buf, len, K_NO_WAIT);
+
+    return err;
+}
+
 
 
 //client_ccc_cfg_changed
@@ -301,14 +264,14 @@ static ssize_t client_write(struct bt_conn *conn, const struct bt_gatt_attr *att
 {
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)bt_con_get_context(conn);
 
-    u8_t *value = attr->user_data;
+    LOG_DBG("** client write called, len: %d\n", len);
 
-    (void)auth_conn;
-     (void)value;
+    /* put bytes into buffer */
+    int err = auth_svc_buffer_put(&auth_conn->rx_buf, (const uint8_t*)buf,  len);
 
-    /* TODO: Need to figure out how this works. */
-
-    return len;
+    /* return number of bytes writen */
+    /* TODO: Test case where only a partial write occured */
+    return err;
 }
 
 
@@ -345,7 +308,7 @@ BT_GATT_SERVICE_DEFINE(auth_svc,
          * to the server (peripheral)
          */
         BT_GATT_CHARACTERISTIC(BT_UUID_AUTH_SVC_SERVER_CHAR, BT_GATT_CHRC_WRITE,
-                               BT_GATT_PERM_READ, NULL, client_write, server_input_buffer),
+                               (BT_GATT_PERM_READ|BT_GATT_PERM_WRITE), NULL, client_write, NULL /*server_input_buffer*/),
 
 );
 

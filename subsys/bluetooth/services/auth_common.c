@@ -82,7 +82,7 @@ int auth_svc_init(struct authenticate_conn *auth_con, struct auth_connection_par
     // init mutexes
     k_sem_init(&auth_con->auth_handshake_sem, 0, 1);
     k_sem_init(&auth_con->auth_indicate_sem, 0, 1);
-    k_sem_init(&auth_con->auth_io_sem, 0, 1);
+    k_sem_init(&auth_con->auth_central_write_sem, 0, 1);
 
     // setup the status callback
     auth_con->status_cb_func = status_func;
@@ -98,6 +98,9 @@ int auth_svc_init(struct authenticate_conn *auth_con, struct auth_connection_par
     {
         auth_con->use_gatt_attributes = true;
     }
+
+    /* Initialize RX buffer */
+    auth_svc_buffer_init(&auth_con->rx_buf);
 
 
 
@@ -189,6 +192,9 @@ int auth_svc_buffer_init(struct auth_io_buffer *iobuf)
     /* init mutex*/
     k_mutex_init(&iobuf->buf_mutex);
 
+    /* init semaphore */
+    k_sem_init(&iobuf->buf_sem, 0, 1);
+
     iobuf->head_index = 0;
     iobuf->tail_index = 0;
     iobuf->num_valid_bytes = 0;
@@ -260,7 +266,24 @@ int auth_svc_buffer_put(struct auth_io_buffer *iobuf, const uint8_t *in_buf,  in
     /* unlock */
     k_mutex_unlock(&iobuf->buf_mutex);
 
+    /* after putting data into buffer, signal semaphore */
+    k_sem_give(&iobuf->buf_sem);
+
     return (int)total_copied;
+}
+
+int auth_svc_buffer_get_wait(struct auth_io_buffer *iobuf, uint8_t *out_buf,  int num_bytes, int waitmsec)
+{
+    int err = !k_sem_take(&iobuf->buf_sem, K_MSEC(waitmsec));
+
+    if(err) {
+        return err;  /* timed out -EAGAIN or error */
+    }
+
+    /* return byte count or error (err < 0) */
+    err = auth_svc_buffer_get(iobuf, out_buf, num_bytes);
+
+    return err;
 }
 
 
