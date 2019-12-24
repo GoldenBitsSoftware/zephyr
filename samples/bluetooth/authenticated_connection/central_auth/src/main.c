@@ -64,7 +64,7 @@ static struct gpio_callback gpio_cb;
 /**
  * Authentication connect struct
  */
-static struct authenticate_conn auth_conn;
+static struct authenticate_conn central_auth_conn;
 //struct auth_connection_params conn_params;
 
 
@@ -83,6 +83,7 @@ typedef struct {
     const struct bt_uuid *uuid;
     const struct bt_gatt_attr *attr;
     uint16_t handle;
+    uint16_t value_handle;
     uint8_t permissions;  /* Bitfields from: BT_GATT_PERM_NONE, BT_GATT_PERM_READ, .. in gatt.h */
     const uint32_t gatt_disc_type;
 } auth_svc_gatt_t;
@@ -93,10 +94,10 @@ static uint32_t auth_desc_index;
 
 /* Table content should match indexes above */
 static auth_svc_gatt_t auth_svc_gatt_tbl[AUTH_SVC_GATT_COUNT] = {
-        { BT_UUID_AUTH_SVC,             NULL, 0, BT_GATT_PERM_NONE, BT_GATT_DISCOVER_PRIMARY },       //!< AUTH_SVC_INDEX
-        { BT_UUID_AUTH_SVC_CLIENT_CHAR, NULL, 0, BT_GATT_PERM_NONE, BT_GATT_DISCOVER_CHARACTERISTIC}, //!< AUTH_SVC_CLIENT_CHAR_INDEX
-        { BT_UUID_GATT_CCC,             NULL, 0, BT_GATT_PERM_NONE, BT_GATT_DISCOVER_DESCRIPTOR},     //!< AUTH_SVC_CLIENT_CCC_INDEX CCC for Client char */
-        { BT_UUID_AUTH_SVC_SERVER_CHAR, NULL, 0, BT_GATT_PERM_NONE, BT_GATT_DISCOVER_CHARACTERISTIC}   //!< AUTH_SVC_SERVER_CHAR_INDEX
+        { BT_UUID_AUTH_SVC,             NULL, 0, 0, BT_GATT_PERM_NONE, BT_GATT_DISCOVER_PRIMARY },       //!< AUTH_SVC_INDEX
+        { BT_UUID_AUTH_SVC_CLIENT_CHAR, NULL, 0, 0, BT_GATT_PERM_NONE, BT_GATT_DISCOVER_CHARACTERISTIC}, //!< AUTH_SVC_CLIENT_CHAR_INDEX
+        { BT_UUID_GATT_CCC,             NULL, 0, 0, BT_GATT_PERM_NONE, BT_GATT_DISCOVER_DESCRIPTOR},     //!< AUTH_SVC_CLIENT_CCC_INDEX CCC for Client char */
+        { BT_UUID_AUTH_SVC_SERVER_CHAR, NULL, 0, 0, BT_GATT_PERM_NONE, BT_GATT_DISCOVER_CHARACTERISTIC}   //!< AUTH_SVC_SERVER_CHAR_INDEX
  };
 
 /**
@@ -138,7 +139,7 @@ static u8_t discover_func(struct bt_conn *conn,
         return BT_GATT_ITER_STOP;
     }
 
-#if 0
+
     // debug output
     printk("====auth_desc_index is: %d=====\n", auth_desc_index);
     printk("[ATTRIBUTE] handle 0x%x\n", attr->handle);
@@ -152,7 +153,7 @@ static u8_t discover_func(struct bt_conn *conn,
     // print attribute UUID
     bt_uuid_to_str(discover_params.uuid, uuid_str, sizeof(uuid_str));
     printk("Discovery UUID: %s\n", uuid_str);
-#endif
+
 
     /**
      * Verify the correct UUID was found
@@ -167,13 +168,8 @@ static u8_t discover_func(struct bt_conn *conn,
     /* save off GATT info */
     auth_svc_gatt_tbl[auth_desc_index].attr = NULL;  /* NOTE: attr var not used for the Central */
     auth_svc_gatt_tbl[auth_desc_index].handle = attr->handle;
+    auth_svc_gatt_tbl[auth_desc_index].value_handle = bt_gatt_attr_value_handle(attr);
     auth_svc_gatt_tbl[auth_desc_index].permissions = attr->perm;
-
-    if(auth_desc_index == AUTH_SVC_CLIENT_CHAR_INDEX) {
-        /* Value handle for the Client characteristic for indication of
-         * perpheral data. */
-        subscribe_params.value_handle = bt_gatt_attr_value_handle(auth_svc_gatt_tbl[AUTH_SVC_CLIENT_CHAR_INDEX].attr);
-    }
 
     auth_desc_index++;
 
@@ -187,14 +183,17 @@ static u8_t discover_func(struct bt_conn *conn,
         struct authenticate_conn *auth_conn = (struct authenticate_conn*)bt_con_get_context(conn);
 
         if(auth_conn != NULL) {
-            auth_conn->server_char_handle = auth_svc_gatt_tbl[AUTH_SVC_SERVER_CHAR_INDEX].handle;
+            auth_conn->server_char_handle = auth_svc_gatt_tbl[AUTH_SVC_SERVER_CHAR_INDEX].value_handle;
         } else {
-            printk("Failed to get authentication connection context.\n");
+            printk("Failed to get connection context.\n");
         }
 
-        /* setup the subscribe params */
+        /* setup the subscribe params
+          Value handle for the Client characteristic for indication of
+          peripheral data. */
         subscribe_params.notify = auth_svc_gatt_central_notify;
         subscribe_params.value = BT_GATT_CCC_NOTIFY;
+        subscribe_params.value_handle = auth_svc_gatt_tbl[AUTH_SVC_CLIENT_CHAR_INDEX].value_handle;
 
         /* Handle for the CCC descriptor itself */
         subscribe_params.ccc_handle = auth_svc_gatt_tbl[AUTH_SVC_CLIENT_CCC_INDEX].handle;
@@ -204,10 +203,13 @@ static u8_t discover_func(struct bt_conn *conn,
             printk("Subscribe failed (err %d)\n", err);
         }
 
-
-        /* set the max MTU */
-        mtu_parms.func = mtu_change_cb;
-        bt_gatt_exchange_mtu(conn, &mtu_parms);
+        /* Start auth process */
+        err = auth_svc_start(auth_conn);
+        if(err) {
+            printk("Failed to start auth service, err: %d\n", err);
+        } else {
+            printk("Started auth service.\n");
+        }
 
         return BT_GATT_ITER_STOP;
     }
@@ -253,15 +255,19 @@ static void connected(struct bt_conn *conn, u8_t conn_err)
 
         /* Save off the bt connection, also set the auth context
          * into the bt connection for later use */
-        auth_conn.conn = conn;
-        bt_conn_set_context(conn, &auth_conn);
+        central_auth_conn.conn = conn;
+        bt_conn_set_context(conn, &central_auth_conn);
+
+        /* set the max MTU */
+        mtu_parms.func = mtu_change_cb;
+        bt_gatt_exchange_mtu(conn, &mtu_parms);
 
         /* If connecting via L2CAP, no need to discover attibutes
         * just connect via L2CAP layer */
-        if(!auth_conn.use_gatt_attributes) {
+        if(!central_auth_conn.use_gatt_attributes) {
 
             // start authentication service
-            int err = auth_svc_start(&auth_conn);
+            err = auth_svc_start(&central_auth_conn);
 
             if(err) {
                 printk("Failed to start L2CAP authentication, error: %d\n", err);
@@ -496,7 +502,7 @@ void main(void)
     struct auth_connection_params con_params = {0};
 
     // TBD, not used just yet
-    memset(&auth_conn, 0, sizeof(auth_conn));
+    memset(&central_auth_conn, 0, sizeof(central_auth_conn));
 
     printk("Central Auth started\n");
 
@@ -505,7 +511,7 @@ void main(void)
      */
     tls_credential_add();
 
-    int err = auth_svc_init(&auth_conn, &con_params, auth_status, NULL, (AUTH_CONN_CENTRAL|AUTH_CONN_DTLS_AUTH_METHOD));
+    int err = auth_svc_init(&central_auth_conn, &con_params, auth_status, NULL, (AUTH_CONN_CENTRAL|AUTH_CONN_DTLS_AUTH_METHOD));
 
 
     if(err) {
@@ -530,7 +536,16 @@ void main(void)
     /* Init button 1 to start scanning process */
     init_button();
 
+    /* get main thread prioirty */
+    k_tid_t thrid = k_current_get();
+
+   int prio = k_thread_priority_get(thrid);
+
+   printk("** main thread priority: %d\n", prio);
+
     /* just spin while the BT modules handle the connection and authentiation */
-    SPIN_FOREVER;
+    while(true) {
+        k_yield();
+    }
 
 }
