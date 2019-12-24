@@ -126,6 +126,8 @@ struct authenticate_conn
     struct k_sem auth_indicate_sem;
     uint32_t indicate_err;
 
+    volatile u8_t write_att_err;
+
     /* Server characteritic handle, used by the Central to send
      * authentication messages to the Peripheral */
     uint16_t server_char_handle;

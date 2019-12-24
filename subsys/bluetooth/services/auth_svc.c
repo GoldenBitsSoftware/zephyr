@@ -124,6 +124,8 @@ static void gatt_write_cb(struct bt_conn *conn, u8_t err, struct bt_gatt_write_p
         LOG_INF("gatt write success.\n");
     }
 
+    auth_conn->write_att_err = err;
+
     k_sem_give(&auth_conn->auth_io_sem);
 }
 
@@ -148,14 +150,25 @@ int auth_svc_central_tx(void *ctx, const unsigned char *buf, size_t len)
         write_params.data = buf;
         write_params.length = write_count;
 
-        bt_gatt_write(auth_conn->conn, &write_params);
+        err = bt_gatt_write(auth_conn->conn, &write_params);
+
+        if(err) {
+            LOG_ERR("Failed to write to peripheral, err: %d\n", err);
+            return err;
+        }
 
         /* wait on semaphore for write completion */
         err = k_sem_take(&auth_conn->auth_io_sem, K_MSEC(3000));
 
         if(err) {
             LOG_ERR("Failed to take semaphore, err: %d\n", err);
-            break;
+            return err;
+        }
+
+        /* Was ther an ATT error code in the call back? */
+        if(auth_conn->write_att_err != 0) {
+            LOG_ERR("ATT write error occured, err: 0x%x\n", auth_conn->write_att_err);
+            return -1;
         }
 
         total_write_cnt += write_count;
@@ -345,7 +358,7 @@ BT_GATT_SERVICE_DEFINE(auth_svc,
          * to the server (peripheral)
          */
         BT_GATT_CHARACTERISTIC(BT_UUID_AUTH_SVC_SERVER_CHAR, BT_GATT_CHRC_WRITE,
-                               BT_GATT_PERM_READ, NULL, client_write, server_input_buffer),
+                              (BT_GATT_PERM_READ|BT_GATT_PERM_WRITE), NULL, client_write, server_input_buffer),
 
 );
 
