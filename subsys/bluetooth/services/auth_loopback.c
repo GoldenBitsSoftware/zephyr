@@ -28,7 +28,7 @@ LOG_MODULE_DECLARE(AUTH_SERVICE_LOG_MODULE);
 
 #ifdef CONFIG_LOOPBACK_TEST
 
-
+#if defined(CONFIG_BT_GATT_CLIENT)
 static int auth_central_tx(struct authenticate_conn *conn, uint8_t *data, size_t len)
 {
     int err = 0;
@@ -57,7 +57,7 @@ static int auth_central_rx(struct authenticate_conn *conn, uint8_t *buf, size_t 
 
     return err;
 }
-
+#else
 static int auth_periph_tx(struct authenticate_conn *conn, uint8_t *data, size_t len)
 {
     int err;
@@ -86,7 +86,7 @@ static int auth_periph_rx(struct authenticate_conn *conn, uint8_t *buf, size_t l
 
     return err;
 }
-
+#endif  /* CONFIG_BT_GATT_CLIENT */
 
 
 #define  TEST_DATA_LEN          (200u)
@@ -108,6 +108,7 @@ void auth_looback_thread(void *arg1, void *arg2, void *arg3)
     /* init some test pattern */
     memset(test_data, 0x41, sizeof(test_data));
 
+#if defined(CONFIG_BT_GATT_CLIENT)
     if(auth_conn->is_central) {
 
         err = auth_central_tx(auth_conn, test_data, test_len);
@@ -115,10 +116,11 @@ void auth_looback_thread(void *arg1, void *arg2, void *arg3)
             printk("Central: failed initial send to peripheral, err: %d.\n", err);
         }
     }
+#endif
 
     while(true) {
 
-
+#if defined(CONFIG_BT_GATT_CLIENT)
          if(auth_conn->is_central) {
 
              // wait for echo back from peripheral
@@ -146,12 +148,10 @@ void auth_looback_thread(void *arg1, void *arg2, void *arg3)
              if(err) {
                  printk("Central: failed to send, err: %d\n", err);
              }
-
-
-         } else {
-
-             // peripehral
-
+         }
+#else
+         /* peripehral */
+         if(!auth_conn->is_central) {
              // wait for test data from central
              /* TODO: how to know when received enough? */
             err = auth_periph_rx(auth_conn, recv_test_data, sizeof(recv_test_data));
@@ -164,9 +164,9 @@ void auth_looback_thread(void *arg1, void *arg2, void *arg3)
             if(err) {
                 printk("Periph: Failed to send data, err: %d\n", err);
             }
+        }
 
-         }
-
+#endif  /*  CONFIG_BT_GATT_CLIENT  */
     }
 
 }
