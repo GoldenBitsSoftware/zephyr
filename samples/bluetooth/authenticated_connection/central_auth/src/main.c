@@ -16,14 +16,21 @@
 #include <device.h>
 #include <drivers/gpio.h>
 
+
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/hci.h>
 #include <bluetooth/conn.h>
 #include <bluetooth/uuid.h>
 #include <bluetooth/gatt.h>
 #include <sys/byteorder.h>
+#include <logging/log.h>
+#include <logging/log_ctrl.h>
 
 #include <bluetooth/services/auth_svc.h>
+
+
+LOG_MODULE_REGISTER(central_auth,  CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
+
 
 #define PORT	DT_ALIAS_SW0_GPIOS_CONTROLLER
 
@@ -49,7 +56,7 @@
 /**
  * Handy macro to spin forever
  */
-#define SPIN_FOREVER        while(1) {};
+#define SPIN_FOREVER        while(1) { };
 
 static struct bt_conn *default_conn;
 static struct bt_uuid_16 uuid = BT_UUID_INIT_16(0);
@@ -108,14 +115,14 @@ struct bt_gatt_exchange_params mtu_parms;
 void mtu_change_cb(struct bt_conn *conn, u8_t err, struct bt_gatt_exchange_params *params)
 {
     if(err) {
-        printk("Failed to set MTU, err: %d\n", err);
+        LOG_ERR("Failed to set MTU, err: %d", err);
     } else {
         struct authenticate_conn *auth_conn = (struct authenticate_conn *)bt_con_get_context(conn);
 
         auth_conn->payload_size = bt_gatt_get_mtu(conn) - BLE_LINK_HEADER_BYTES;
 
-        printk("Successfuly set MTU to: %d\n", bt_gatt_get_mtu(conn));
-        printk("Payload size is: %d\n", auth_conn->payload_size );
+        LOG_DBG("Successfuly set MTU to: %d", bt_gatt_get_mtu(conn));
+        LOG_DBG("Payload size is: %d", auth_conn->payload_size );
     }
 }
 
@@ -137,25 +144,25 @@ static u8_t discover_func(struct bt_conn *conn,
     int err;
 
     if (!attr) {
-        printk("Discover complete, NULL attribute.\n");
+        LOG_INF("Discover complete, NULL attribute.");
         (void)memset(params, 0, sizeof(*params));
         return BT_GATT_ITER_STOP;
     }
 
 
     // debug output
-    printk("====auth_desc_index is: %d=====\n", auth_desc_index);
-    printk("[ATTRIBUTE] handle 0x%x\n", attr->handle);
-    printk("[ATTRIBUTE] value handle 0x%x\n", bt_gatt_attr_value_handle(attr));
+    LOG_DBG("====auth_desc_index is: %d=====", auth_desc_index);
+    LOG_DBG("[ATTRIBUTE] handle 0x%x", attr->handle);
+    LOG_DBG("[ATTRIBUTE] value handle 0x%x", bt_gatt_attr_value_handle(attr));
 
     /* let's get string */
     char uuid_str[50];
     bt_uuid_to_str(attr->uuid, uuid_str, sizeof(uuid_str));
-    printk("Attribute UUID: %s\n", uuid_str);
+    LOG_DBG("Attribute UUID: %s", log_strdup(uuid_str));
 
     // print attribute UUID
     bt_uuid_to_str(discover_params.uuid, uuid_str, sizeof(uuid_str));
-    printk("Discovery UUID: %s\n", uuid_str);
+    LOG_DBG("Discovery UUID: %s", log_strdup(uuid_str));
 
 
     /**
@@ -164,7 +171,7 @@ static u8_t discover_func(struct bt_conn *conn,
     if (bt_uuid_cmp(discover_params.uuid, auth_svc_gatt_tbl[auth_desc_index].uuid)) {
 
         /* Failed, not the UUID we're expecting */
-        printk("Error Unknown UUID\n");
+        LOG_ERR("Error Unknown UUID.");
         return BT_GATT_ITER_STOP;
     }
 
@@ -180,7 +187,7 @@ static u8_t discover_func(struct bt_conn *conn,
     if(auth_desc_index >= AUTH_SVC_GATT_COUNT) {
 
         /* we're done */
-        printk("Discover complete\n");
+        LOG_INF("Discover complete");
 
         /* save off the server attribute handle */
         struct authenticate_conn *auth_conn = (struct authenticate_conn*)bt_con_get_context(conn);
@@ -188,7 +195,7 @@ static u8_t discover_func(struct bt_conn *conn,
         if(auth_conn != NULL) {
             auth_conn->server_char_handle = auth_svc_gatt_tbl[AUTH_SVC_SERVER_CHAR_INDEX].value_handle;
         } else {
-            printk("Failed to get connection context.\n");
+            LOG_ERR("Failed to get connection context.");
         }
 
         /* setup the subscribe params
@@ -203,15 +210,15 @@ static u8_t discover_func(struct bt_conn *conn,
 
         err = bt_gatt_subscribe(conn, &subscribe_params);
         if (err && err != -EALREADY) {
-            printk("Subscribe failed (err %d)\n", err);
+            LOG_ERR("Subscribe failed (err %d)", err);
         }
 
         /* Start auth process */
         err = auth_svc_start(auth_conn);
         if(err) {
-            printk("Failed to start auth service, err: %d\n", err);
+            LOG_ERR("Failed to start auth service, err: %d", err);
         } else {
-            printk("Started auth service.\n");
+            LOG_INF("Started auth service.");
         }
 
         return BT_GATT_ITER_STOP;
@@ -227,7 +234,7 @@ static u8_t discover_func(struct bt_conn *conn,
     /* Start discovery */
     err = bt_gatt_discover(conn, &discover_params);
     if (err) {
-        printk("Discover failed (err %d)\n", err);
+        LOG_ERR("Discover failed (err %d)", err);
     }
 
 
@@ -248,11 +255,11 @@ static void connected(struct bt_conn *conn, u8_t conn_err)
     bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
     if (conn_err) {
-        printk("Failed to connect to %s (%u)\n", addr, conn_err);
+        LOG_ERR("Failed to connect to %s (%u)", log_strdup(addr), conn_err);
         return;
     }
 
-    printk("Connected: %s\n", addr);
+    LOG_INF("Connected: %s", log_strdup(addr));
 
     if (conn == default_conn) {
 
@@ -273,7 +280,7 @@ static void connected(struct bt_conn *conn, u8_t conn_err)
             err = auth_svc_start(&central_auth_conn);
 
             if(err) {
-                printk("Failed to start L2CAP authentication, error: %d\n", err);
+                LOG_ERR("Failed to start L2CAP authentication, error: %d", err);
             }
 
             return;
@@ -295,7 +302,7 @@ static void connected(struct bt_conn *conn, u8_t conn_err)
          */
         err = bt_gatt_discover(default_conn, &discover_params);
         if (err) {
-            printk("Discover failed(err %d)\n", err);
+            LOG_ERR("Discover failed(err %d)", err);
             return;
         }
     }
@@ -313,13 +320,13 @@ static bool bt_adv_data_found(struct bt_data *data, void *user_data)
     bt_addr_le_t *addr = user_data;
     int i;
 
-    printk("[AD]: %u data_len %u\n", data->type, data->data_len);
+    LOG_DBG("[AD]: %u data_len %u", data->type, data->data_len);
 
     switch (data->type) {
         case BT_DATA_UUID16_SOME:
         case BT_DATA_UUID16_ALL:
             if (data->data_len % sizeof(u16_t) != 0U) {
-                printk("AD malformed\n");
+                LOG_WRN("AD malformed");
                 return true;
             }
 
@@ -342,7 +349,7 @@ static bool bt_adv_data_found(struct bt_data *data, void *user_data)
                 /* stop scanning, we've found the service */
                 err = bt_le_scan_stop();
                 if (err) {
-                    printk("Stop LE scan failed (err %d)\n", err);
+                    LOG_ERR("Stop LE scan failed (err %d)", err);
                     continue;
                 }
 
@@ -374,8 +381,8 @@ static void device_found(const bt_addr_le_t *addr, s8_t rssi, u8_t type,
     char dev[BT_ADDR_LE_STR_LEN];
 
     bt_addr_le_to_str(addr, dev, sizeof(dev));
-    printk("[DEVICE]: %s, AD evt type %u, AD data len %u, RSSI %i\n",
-           dev, type, ad->len, rssi);
+    LOG_DBG("[DEVICE]: %s, AD evt type %u, AD data len %u, RSSI %i",
+           log_strdup(dev), type, ad->len, rssi);
 
     /* We're only interested in connectable events */
     if (type == BT_LE_ADV_IND || type == BT_LE_ADV_DIRECT_IND) {
@@ -390,7 +397,7 @@ static void disconnected(struct bt_conn *conn, u8_t reason)
 
     bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-    printk("Disconnected: %s (reason 0x%02x)\n", addr, reason);
+    LOG_INF("Disconnected: %s (reason 0x%02x)", log_strdup(addr), reason);
 
     if (default_conn != conn) {
         return;
@@ -398,12 +405,6 @@ static void disconnected(struct bt_conn *conn, u8_t reason)
 
     bt_conn_unref(default_conn);
     default_conn = NULL;
-
-    /* This demo doesn't require active scan */
-    //err = bt_le_scan_start(BT_LE_SCAN_PASSIVE, device_found);
-    //if (err) {
-    //    printk("Scanning failed to start (err %d)\n", err);
-   // }
 }
 
 /**
@@ -421,15 +422,14 @@ static struct k_work ble_start_scan_work;
  */
 static void ble_scan_work_func(struct k_work *work)
 {
-    printk("Starting BLE scanning\n");
+    LOG_INF("Starting BLE scanning");
 
     /* start scanning */
     int err = bt_le_scan_start(BT_LE_SCAN_ACTIVE, device_found);
 
     if (err) {
-        printk("Scanning failed to start (err %d)\n", err);
+        LOG_ERR("Scanning failed to start (err %d)", err);
     }
-
 }
 
 /**
@@ -442,7 +442,7 @@ static void ble_scan_work_func(struct k_work *work)
 static void button_pressed(struct device *gpiob, struct gpio_callback *cb,
                            u32_t pins)
 {
-    printk("Button pressed\n");
+    LOG_DBG("Button pressed");
 
     /* Since this function is called directly by the interrupt, start
      * the BLE in a reguar thread context.  Create a work item which
@@ -463,7 +463,7 @@ static int init_button(void)
 
     gpiob = device_get_binding(PORT);
     if (!gpiob) {
-        printk("Failed to get GPIO port: %s\n", PORT);
+        LOG_ERR("Failed to get GPIO port: %s", PORT);
         return -1;
     }
 
@@ -496,7 +496,7 @@ static int tls_credential_add()
 static void auth_status(struct authenticate_conn *auth_conn, auth_status_t status, void *context)
 {
     //
-    printk("Authentication process status: %d\n", status);
+    LOG_INF("Authentication process status: %d", status);
 }
 
 void main(void)
@@ -507,7 +507,9 @@ void main(void)
     // TBD, not used just yet
     memset(&central_auth_conn, 0, sizeof(central_auth_conn));
 
-    printk("Central Auth started\n");
+    log_init();
+
+    LOG_INF("Central Auth started.");
 
     /**
      * Add certificates to tls_credentls store
@@ -519,7 +521,7 @@ void main(void)
 
 
     if(err) {
-        printk("Failed to init authentication service.\n");
+        LOG_ERR("Failed to init authentication service, err: %d.", err);
         return;
     }
 
@@ -530,7 +532,7 @@ void main(void)
      */
     err = bt_enable(NULL);
     if (err) {
-        printk("Failed to enable the bluetooth module, err: %d\n", err);
+        LOG_ERR("Failed to enable the bluetooth module, err: %d", err);
         SPIN_FOREVER;
     }
 
@@ -540,15 +542,16 @@ void main(void)
     /* Init button 1 to start scanning process */
     init_button();
 
-    /* get main thread prioirty */
-    k_tid_t thrid = k_current_get();
-
-   int prio = k_thread_priority_get(thrid);
-
-   printk("** main thread priority: %d\n", prio);
 
     /* just spin while the BT modules handle the connection and authentiation */
     while(true) {
+
+        /* process log messages */
+        while(log_process(false)) {
+            ; /* intentionally empty */
+        }
+
+        /* Let the handshake thread run */
         k_yield();
     }
 

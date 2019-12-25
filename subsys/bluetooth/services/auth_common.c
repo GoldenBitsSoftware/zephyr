@@ -22,7 +22,7 @@
 #include <bluetooth/services/auth_svc.h>
 
 #include <logging/log.h>
-LOG_MODULE_DECLARE(AUTH_SERVICE_LOG_MODULE);
+LOG_MODULE_DECLARE(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 
 
 #define HANDSHAKE_THRD_STACK_SIZE       1024
@@ -79,7 +79,7 @@ int auth_svc_init(struct authenticate_conn *auth_con, struct auth_connection_par
     /* init the struct to zero */
     memset(auth_con, 0, sizeof(struct authenticate_conn));
 
-    // init mutexes
+    /* init mutexes */
     k_sem_init(&auth_con->auth_handshake_sem, 0, 1);
     k_sem_init(&auth_con->auth_indicate_sem, 0, 1);
     k_sem_init(&auth_con->auth_central_write_sem, 0, 1);
@@ -101,7 +101,6 @@ int auth_svc_init(struct authenticate_conn *auth_con, struct auth_connection_par
 
     /* Initialize RX buffer */
     auth_svc_buffer_init(&auth_con->rx_buf);
-
 
 
 

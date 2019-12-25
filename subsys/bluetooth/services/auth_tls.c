@@ -40,7 +40,7 @@
 
 #define LOG_LEVEL CONFIG_BT_GATT_AUTHS_LOG_LEVEL
 #include <logging/log.h>
-LOG_MODULE_DECLARE(AUTH_SERVICE_LOG_MODULE);
+LOG_MODULE_DECLARE(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 
 #define MAX_MBEDTLS_CONTEXT     5
 
@@ -229,7 +229,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
     if( ( ret = mbedtls_ssl_setup( &mbed_ctx->ssl, &mbed_ctx->conf ) ) != 0 )
     {
         auth_free_mbedcontext(mbed_ctx);
-        LOG_ERR( "mbedtls_ssl_setup returned %d\n\n", ret );
+        LOG_ERR( "mbedtls_ssl_setup returned %d", ret );
         return AUTH_ERROR_DTLS_INIT_FAILED;
     }
 

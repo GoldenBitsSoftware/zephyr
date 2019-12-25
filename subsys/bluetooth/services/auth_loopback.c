@@ -20,7 +20,7 @@
 
 #define LOG_LEVEL CONFIG_BT_GATT_AUTHS_LOG_LEVEL
 #include <logging/log.h>
-LOG_MODULE_DECLARE(AUTH_SERVICE_LOG_MODULE);
+LOG_MODULE_DECLARE(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 
 #include <bluetooth/services/auth_svc.h>
 
@@ -111,9 +111,9 @@ void auth_looback_thread(void *arg1, void *arg2, void *arg3)
 
         numbytes = auth_central_tx(auth_conn, test_data, test_len);
         if(numbytes < 0) {
-            printk("Central: failed initial send to peripheral, err: %d.\n", numbytes);
+            LOG_ERR("Central: failed initial send to peripheral, err: %d.\n", numbytes);
         } else {
-            printk("Central: wrote %d bytes.\n", numbytes);
+            LOG_DBG("Central: wrote %d bytes.\n", numbytes);
         }
     }
 #endif
@@ -135,16 +135,14 @@ void auth_looback_thread(void *arg1, void *arg2, void *arg3)
                  numbytes = auth_central_rx(auth_conn, recv_test_data + rx_byte_count, test_len);
 
                  if(numbytes == -EAGAIN) {
-                    printk("Central: Timed out, trying read again.\n");
+                    LOG_ERR("Central: Timed out, trying read again.\n");
                     continue;
                  }
 
                  if(numbytes < 0) {
-                    printk("Central: failed receive from peripheral, err: %d.\n", numbytes);
+                    LOG_DBG("Central: failed receive from peripheral, err: %d.\n", numbytes);
                     break;
                  }
-
-                 printk("** read byte chunk, bytes: %d.\n", numbytes);
 
                  rx_byte_count += numbytes;
              }
@@ -155,60 +153,52 @@ void auth_looback_thread(void *arg1, void *arg2, void *arg3)
 
              if(rx_byte_count == 0) {
                  /* Didn't read any bytes */
-                 printk("** read zero bytes from peripheral.\n");
+                 LOG_INF("Central: Read zero bytes from peripheral.\n");
                  continue;
              }
 
-             printk("** read %d bytes from peripheral.\n", rx_byte_count);
+             LOG_DBG("Central: Read %d bytes from peripheral.\n", rx_byte_count);
 
-             // verify test pattern
+             /* verify test pattern */
              if(memcmp(test_data, recv_test_data, test_len)) {
-                 // Failed!!
                  printk("Central: Failed data check.\n");
              }
 
 
-            // vary the data length
-            //test_len += 10;
-            //if(test_len > TEST_DATA_LEN) {
-            //     test_len = 10;
-            //}
-
              // send packet again
              numbytes = auth_central_tx(auth_conn, test_data, test_len);
              if(numbytes < 0) {
-                 printk("Central: failed to send, err: %d\n", numbytes);
+                 LOG_ERR("Central: failed to send, err: %d\n", numbytes);
              } else {
-                printk("Central: wrote %d bytes.\n", numbytes);
+                 LOG_DBG("Central: wrote %d bytes.\n", numbytes);
              }
          }
 #else
          /* peripehral */
          if(!auth_conn->is_central) {
-             // wait for test data from central
-             /* TODO: how to know when received enough? */
+             /* wait for test data from central */
             numbytes = auth_periph_rx(auth_conn, recv_test_data, sizeof(recv_test_data));
 
             if(numbytes < 0 && numbytes != -EAGAIN) {
-                printk("Periph: Failed to recieve data, err: %d\n", numbytes);
+                LOG_INF("Periph: Failed to recieve data, err: %d\n", numbytes);
             }
 
             if(numbytes == -EAGAIN) {
                 /* just timed out, try again */
-                printk("Timed out, trying to read again.\n");
+                LOG_INF("Periph: Timed out, trying to read again.\n");
                 continue;
             }
 
-            printk("** bytes read: %d\n", numbytes);
+            LOG_DBG("Periph: bytes read: %d\n", numbytes);
 
             if(numbytes == 0) {
                 continue;
             }
 
-             // echo back
+             /* echo back */
              numbytes = auth_periph_tx(auth_conn, recv_test_data, numbytes);
             if(numbytes < 0) {
-                printk("Periph: Failed to send data, err: %d\n", numbytes);
+                LOG_ERR("Periph: Failed to send data, err: %d\n", numbytes);
             }
         }
 

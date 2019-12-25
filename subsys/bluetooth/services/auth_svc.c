@@ -19,7 +19,7 @@
 
 #define LOG_LEVEL CONFIG_BT_GATT_AUTHS_LOG_LEVEL
 #include <logging/log.h>
-LOG_MODULE_REGISTER(AUTH_SERVICE_LOG_MODULE);
+LOG_MODULE_REGISTER(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 
 #include <bluetooth/services/auth_svc.h>
 
@@ -36,12 +36,11 @@ u8_t auth_svc_gatt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)bt_con_get_context(conn);
 
     if(auth_conn == NULL) {
-        /* TODO: Log an error */
-        printk("auth_svc_gatt_central_notify: NULL auth_conn.\n");
+        LOG_ERR("auth_svc_gatt_central_notify: NULL auth_conn.");
         return BT_GATT_ITER_CONTINUE;
     }
 
-    printk("** num bytes received: %d\n", length);
+    LOG_DBG("num bytes received: %d", length);
 
     /* This happens when the connection is dropped */
     if(length == 0) {
@@ -53,8 +52,7 @@ u8_t auth_svc_gatt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe
 
 
     if((numbytes < 0) || (numbytes != length)) {
-        /* log an error */
-        LOG_ERR("Failed to set all received bytes, err: %d\n", numbytes);
+        LOG_ERR("Failed to set all received bytes, err: %d", numbytes);
         return BT_GATT_ITER_CONTINUE;
     }
 
@@ -88,9 +86,9 @@ static void gatt_central_write_cb(struct bt_conn *conn, u8_t err, struct bt_gatt
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)bt_con_get_context(conn);
 
     if(err) {
-        LOG_ERR("gatt write failed, err: %d\n", err);
+        LOG_ERR("gatt write failed, err: %d", err);
     } else {
-        printk("gatt write success.\n");
+        LOG_DBG("gatt write success.");
     }
 
     auth_conn->write_att_err = err;
@@ -122,7 +120,7 @@ int auth_svc_central_tx(void *ctx, const unsigned char *buf, size_t len)
         err = bt_gatt_write(auth_conn->conn, &write_params);
 
         if(err) {
-            LOG_ERR("Failed to write to peripheral, err: %d\n", err);
+            LOG_ERR("Failed to write to peripheral, err: %d", err);
             return err;
         }
 
@@ -130,13 +128,13 @@ int auth_svc_central_tx(void *ctx, const unsigned char *buf, size_t len)
         err = k_sem_take(&auth_conn->auth_central_write_sem, K_MSEC(3000));
 
         if(err) {
-            LOG_ERR("Failed to take semaphore, err: %d\n", err);
+            LOG_ERR("Failed to take semaphore, err: %d", err);
             return err;
         }
 
         /* Was ther an ATT error code in the call back? */
         if(auth_conn->write_att_err != 0) {
-            LOG_ERR("ATT write error occured, err: 0x%x\n", auth_conn->write_att_err);
+            LOG_ERR("ATT write error occured, err: 0x%x", auth_conn->write_att_err);
             return -1;
         }
 
@@ -186,9 +184,9 @@ int auth_svc_peripheral_tx(void *ctx, const unsigned char *buf, size_t len)
         auth_conn->payload_size = bt_gatt_get_mtu(auth_conn->conn) - BLE_LINK_HEADER_BYTES;
     }
 
-    // DAG DEBUG BEG
-    printk("auth_svc_peripheral_tx(), sending %d bytes.\n", len);
-    // DAG DEBUG END
+
+    LOG_DBG("auth_svc_peripheral_tx(), sending %d bytes.", len);
+
 
     /* Setup the indicate params.  The client will use BLE indications vs.
      * notifications.  This enables the client to know when the central has
@@ -216,7 +214,7 @@ int auth_svc_peripheral_tx(void *ctx, const unsigned char *buf, size_t len)
 
         // on wakeup check if error occurred
         if(ret != 0) {
-            printk("Wait for central indicated failed, err: %d\n", ret);
+            LOG_ERR("Wait for central indicated failed, err: %d", ret);
             break;
         }
 
@@ -285,7 +283,7 @@ static ssize_t client_write(struct bt_conn *conn, const struct bt_gatt_attr *att
 {
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)bt_con_get_context(conn);
 
-    printk("** client write called, len: %d\n", len);
+    LOG_DBG("client write called, len: %d", len);
 
     /* put bytes into buffer */
     int err = auth_svc_buffer_put(&auth_conn->rx_buf, (const uint8_t*)buf,  len);
@@ -315,7 +313,7 @@ BT_GATT_SERVICE_DEFINE(auth_svc,
         BT_GATT_CHARACTERISTIC(BT_UUID_AUTH_SVC_CLIENT_CHAR, BT_GATT_CHRC_INDICATE,
                                    (BT_GATT_PERM_READ|BT_GATT_PERM_WRITE), NULL, NULL, NULL),
         BT_GATT_CCC(client_ccc_cfg_changed,
-                    BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+                                    BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
         /**
          * Server characteristic, used by the central (client role) to write authentication messages to.
