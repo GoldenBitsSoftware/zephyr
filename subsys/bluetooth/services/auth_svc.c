@@ -177,8 +177,17 @@ int auth_svc_peripheral_tx(void *ctx, const unsigned char *buf, size_t len)
     int total_bytes_sent = 0;
     bool done = false;
     size_t send_cnt = 0;
-    size_t mtu = auth_conn->mtu;
 
+    /* Check the MTU, if not set correctly then set. Future enhancement
+     * should include a callback to notify the peripheral if the MTU has
+     * changed. */
+    if(auth_conn->mtu == 0) {
+        auth_conn->mtu = bt_gatt_get_mtu(auth_conn->conn);
+    }
+
+    // DAG DEBUG BEG
+    printk("auth_svc_peripheral_tx(), sending %d bytes.\n", len);
+    // DAG DEBUG END
 
     /* Setup the indicate params.  The client will use BLE indications vs.
      * notifications.  This enables the client to know when the central has
@@ -188,9 +197,7 @@ int auth_svc_peripheral_tx(void *ctx, const unsigned char *buf, size_t len)
 
     while (!done)
     {
-        if(len > mtu) {
-            send_cnt = mtu;
-        }
+        send_cnt = MIN(len, auth_conn->mtu);
 
         // setup indicate params
         memset(&indicate_params, 0, sizeof(indicate_params));
@@ -277,7 +284,7 @@ static ssize_t client_write(struct bt_conn *conn, const struct bt_gatt_attr *att
 {
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)bt_con_get_context(conn);
 
-    LOG_DBG("** client write called, len: %d\n", len);
+    printk("** client write called, len: %d\n", len);
 
     /* put bytes into buffer */
     int err = auth_svc_buffer_put(&auth_conn->rx_buf, (const uint8_t*)buf,  len);
