@@ -274,7 +274,7 @@ int auth_svc_buffer_put(struct auth_io_buffer *iobuf, const uint8_t *in_buf,  in
 
 int auth_svc_buffer_get_wait(struct auth_io_buffer *iobuf, uint8_t *out_buf,  int num_bytes, int waitmsec)
 {
-    int err = !k_sem_take(&iobuf->buf_sem, K_MSEC(waitmsec));
+    int err = k_sem_take(&iobuf->buf_sem, K_MSEC(waitmsec));
 
     if(err) {
         return err;  /* timed out -EAGAIN or error */
@@ -388,5 +388,6 @@ int auth_svc_buffer_clear(struct auth_io_buffer *iobuf) {
 
     return err;
 }
+
 
 
