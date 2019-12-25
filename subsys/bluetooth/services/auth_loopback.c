@@ -75,8 +75,7 @@ static int auth_periph_rx(struct authenticate_conn *conn, uint8_t *buf, size_t l
     int err;
 
     if(conn->use_gatt_attributes) {
-        err = auth_svc_peripheral_recv(conn, buf, len);
-        // int auth_svc_peripheral_recv_timeout(void *ctx, unsigned char *buf, size_t len, uint32_t timeout)
+        err = auth_svc_peripheral_recv_timeout(conn, buf, len, 3000);
     } else {
          err =  auth_svc_recv_l2cap(conn, buf, len);
         // int auth_svc_recv_over_l2cap_timeout(void *ctx, unsigned char *buf,
@@ -159,15 +158,28 @@ void auth_looback_thread(void *arg1, void *arg2, void *arg3)
          if(!auth_conn->is_central) {
              // wait for test data from central
              /* TODO: how to know when received enough? */
-            err = auth_periph_rx(auth_conn, recv_test_data, sizeof(recv_test_data));
-            if(err) {
-                printk("Periph: Failed to recieve data, err: %d\n", err);
+            numbytes = auth_periph_rx(auth_conn, recv_test_data, sizeof(recv_test_data));
+
+            if(numbytes < 0 && numbytes != -EAGAIN) {
+                printk("Periph: Failed to recieve data, err: %d\n", numbytes);
+            }
+
+            if(numbytes == -EAGAIN) {
+                /* just timed out, try again */
+                printk("Timed out, trying to read again.\n");
+                continue;
+            }
+
+            printk("** bytes read: %d\n", numbytes);
+
+            if(numbytes == 0) {
+                continue;
             }
 
              // echo back
-             err = auth_periph_tx(auth_conn, recv_test_data, sizeof(recv_test_data));
-            if(err) {
-                printk("Periph: Failed to send data, err: %d\n", err);
+             numbytes = auth_periph_tx(auth_conn, recv_test_data, numbytes);
+            if(numbytes < 0) {
+                printk("Periph: Failed to send data, err: %d\n", numbytes);
             }
         }
 
