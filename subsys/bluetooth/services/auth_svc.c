@@ -179,11 +179,11 @@ int auth_svc_peripheral_tx(void *ctx, const unsigned char *buf, size_t len)
     bool done = false;
     size_t send_cnt = 0;
 
-    /* Check the MTU, if not set correctly then set. Future enhancement
+    /* Check the payload_size, if not set correctly then set. Future enhancement
      * should include a callback to notify the peripheral if the MTU has
      * changed. */
-    if(auth_conn->mtu == 0) {
-        auth_conn->mtu = bt_gatt_get_mtu(auth_conn->conn);
+    if(auth_conn->payload_size == 0) {
+        auth_conn->payload_size = bt_gatt_get_mtu(auth_conn->conn) - BLE_LINK_HEADER_BYTES;
     }
 
     // DAG DEBUG BEG
