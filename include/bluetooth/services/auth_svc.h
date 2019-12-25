@@ -29,7 +29,9 @@ extern "C" {
 /**
  * Should be large enoough to hold one TLS record
  */
-#define CENTRAL_RX_BUFER_LEN        1024
+#define CENTRAL_RX_BUFFER_LEN               500
+
+#define BLE_LINK_HEADER_BYTES               (2u + 1u)  /* two bytes for header, not sure about extra byte */
 
 
 #define AUTH_SUCCESS                        0
@@ -133,7 +135,7 @@ struct authenticate_conn
      * authentication messages to the Peripheral */
     uint16_t server_char_handle;
 
-    uint16_t mtu;  /* mtu len for the BLE link */
+    uint16_t payload_size;  /* BLE Link MTUless struct bt_att_write_req */
 
     /* Attributes, these should be used by the Peripheral, not used by the Central. */
     const struct bt_gatt_attr *auth_svc_attr;    /* service attribute */
