@@ -47,8 +47,7 @@ static int auth_central_rx(struct authenticate_conn *conn, uint8_t *buf, size_t 
 {
     int err;
     if(conn->use_gatt_attributes) {
-        err = auth_svc_central_recv(conn, buf, rxbytes);
-        //auth_svc_central_recv_timeout(void *ctx, unsigned char *buf, size_t len, uint32_t timeout);
+        err = auth_svc_central_recv_timeout(conn, buf, rxbytes, 3000);
     } else {
         err =  auth_svc_recv_l2cap(conn, buf, rxbytes);
         // int auth_svc_recv_over_l2cap_timeout(void *ctx, unsigned char *buf,
@@ -98,9 +97,8 @@ static int auth_periph_rx(struct authenticate_conn *conn, uint8_t *buf, size_t l
  */
 void auth_looback_thread(void *arg1, void *arg2, void *arg3)
 {
-    int err;
     int numbytes;
-    uint32_t test_len = 10;
+    uint32_t test_len = 100;
     uint8_t test_data[TEST_DATA_LEN];
     uint8_t recv_test_data[TEST_DATA_LEN];
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)arg1;
@@ -123,14 +121,45 @@ void auth_looback_thread(void *arg1, void *arg2, void *arg3)
     while(true) {
 
 #if defined(CONFIG_BT_GATT_CLIENT)
+
+         int rx_byte_count;
          if(auth_conn->is_central) {
 
-             // wait for echo back from peripheral
-             numbytes = auth_central_rx(auth_conn, recv_test_data, test_len);
-             if(numbytes < 0) {
-                printk("Central: failed receive from peripheral, err: %d.\n", numbytes);
+             memset(recv_test_data, 0, sizeof(recv_test_data));
+             rx_byte_count = 0;
+             numbytes = 0;
+
+             while(rx_byte_count < test_len) {
+
+                 /* wait for echo back from peripheral */
+                 numbytes = auth_central_rx(auth_conn, recv_test_data + rx_byte_count, test_len);
+
+                 if(numbytes == -EAGAIN) {
+                    printk("Central: Timed out, trying read again.\n");
+                    continue;
+                 }
+
+                 if(numbytes < 0) {
+                    printk("Central: failed receive from peripheral, err: %d.\n", numbytes);
+                    break;
+                 }
+
+                 printk("** read byte chunk, bytes: %d.\n", numbytes);
+
+                 rx_byte_count += numbytes;
              }
 
+             if(numbytes < 0) {
+                 continue;
+             }
+
+             if(rx_byte_count == 0) {
+                 /* Didn't read any bytes */
+                 printk("** read zero bytes from peripheral.\n");
+                 continue;
+             }
+
+             printk("** read %d bytes from peripheral.\n", rx_byte_count);
 
              // verify test pattern
              if(memcmp(test_data, recv_test_data, test_len)) {
@@ -146,9 +175,9 @@ void auth_looback_thread(void *arg1, void *arg2, void *arg3)
             //}
 
              // send packet again
-             err = auth_central_tx(auth_conn, test_data, test_len);
-             if(err < 0) {
-                 printk("Central: failed to send, err: %d\n", err);
+             numbytes = auth_central_tx(auth_conn, test_data, test_len);
+             if(numbytes < 0) {
+                 printk("Central: failed to send, err: %d\n", numbytes);
              } else {
                 printk("Central: wrote %d bytes.\n", numbytes);
              }

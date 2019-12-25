@@ -111,8 +111,11 @@ void mtu_change_cb(struct bt_conn *conn, u8_t err, struct bt_gatt_exchange_param
         printk("Failed to set MTU, err: %d\n", err);
     } else {
         struct authenticate_conn *auth_conn = (struct authenticate_conn *)bt_con_get_context(conn);
-        auth_conn->mtu = bt_gatt_get_mtu(conn);
-        printk("Successfuly set MTU to: %d\n", auth_conn->mtu);
+
+        auth_conn->payload_size = bt_gatt_get_mtu(conn) - BLE_LINK_HEADER_BYTES;
+
+        printk("Successfuly set MTU to: %d\n", bt_gatt_get_mtu(conn));
+        printk("Payload size is: %d\n", auth_conn->payload_size );
     }
 }
 
@@ -510,6 +513,7 @@ void main(void)
      * Add certificates to tls_credentls store
      */
     tls_credential_add();
+
 
     int err = auth_svc_init(&central_auth_conn, &con_params, auth_status, NULL, (AUTH_CONN_CENTRAL|AUTH_CONN_DTLS_AUTH_METHOD));
 

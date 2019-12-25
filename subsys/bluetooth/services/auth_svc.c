@@ -37,6 +37,7 @@ u8_t auth_svc_gatt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe
 
     if(auth_conn == NULL) {
         /* TODO: Log an error */
+        printk("auth_svc_gatt_central_notify: NULL auth_conn.\n");
         return BT_GATT_ITER_CONTINUE;
     }
 
@@ -89,7 +90,7 @@ static void gatt_central_write_cb(struct bt_conn *conn, u8_t err, struct bt_gatt
     if(err) {
         LOG_ERR("gatt write failed, err: %d\n", err);
     } else {
-        LOG_INF("gatt write success.\n");
+        printk("gatt write success.\n");
     }
 
     auth_conn->write_att_err = err;
@@ -113,7 +114,7 @@ int auth_svc_central_tx(void *ctx, const unsigned char *buf, size_t len)
     /* if necessary break up the write */
     while(len != 0) {
 
-        write_count = MIN(auth_conn->mtu, len);
+        write_count = MIN(auth_conn->payload_size, len);
 
         write_params.data = buf;
         write_params.length = write_count;
@@ -197,7 +198,7 @@ int auth_svc_peripheral_tx(void *ctx, const unsigned char *buf, size_t len)
 
     while (!done)
     {
-        send_cnt = MIN(len, auth_conn->mtu);
+        send_cnt = MIN(len, auth_conn->payload_size);
 
         // setup indicate params
         memset(&indicate_params, 0, sizeof(indicate_params));
@@ -295,13 +296,6 @@ static ssize_t client_write(struct bt_conn *conn, const struct bt_gatt_attr *att
 }
 
 
-
-// TODO:  Need to make the input buffer per-connection.
-// use bt_gatt_service_register() to dynamically register a buffer vs. static buffer
-// Or we can iterate through the attributes and set a buffer for the server input
-// buffer.  see: bt_gatt_attr_next()
-static uint8_t server_input_buffer[100];
-
 /* AUTH Service Declaration */
 BT_GATT_SERVICE_DEFINE(auth_svc,
         BT_GATT_PRIMARY_SERVICE(BT_UUID_AUTH_SVC),
@@ -328,7 +322,7 @@ BT_GATT_SERVICE_DEFINE(auth_svc,
          * to the server (peripheral)
          */
         BT_GATT_CHARACTERISTIC(BT_UUID_AUTH_SVC_SERVER_CHAR, BT_GATT_CHRC_WRITE,
-                               (BT_GATT_PERM_READ|BT_GATT_PERM_WRITE), NULL, client_write, NULL /*server_input_buffer*/),
+                               (BT_GATT_PERM_READ|BT_GATT_PERM_WRITE), NULL, client_write, NULL),
 );
 
 /**
