@@ -24,15 +24,6 @@
 
 
 
-#if 0
--- Misc notes....
-* Authenticate via L2CAP or Attribute?
-* Can authenticate via L2CAP, but still use attributes.
-* OR use dedicated characteristic for authentication.
-* Will need authentiation state machine.
-
-* Add an authentication service to Zephyr, similar to hrs.c (heart rate service)?
-#endif
 
 struct bt_conn *default_conn;
 
@@ -72,12 +63,12 @@ static void connected(struct bt_conn *conn, u8_t err)
 
         is_connected = true;
 
+        /* Start authentication */
+        int ret = auth_svc_start(&auth_conn);
 
-        // Start authentication??
-
-        // is the service enumeration done by now?
-
-
+        if(ret) {
+            printk("Failed to start authentication service, err: %d\n", ret);
+        }
     }
 }
 
@@ -157,11 +148,9 @@ void main(void)
 
     struct auth_connection_params con_params = {0};
 
-    auth_error_t auth_err;
-    auth_err = auth_svc_init(&auth_conn, &con_params, auth_status, NULL, (AUTH_CONN_PERIPHERAL|AUTH_CONN_DTLS_AUTH_METHOD));
+    err = auth_svc_init(&auth_conn, &con_params, auth_status, NULL, (AUTH_CONN_PERIPHERAL|AUTH_CONN_DTLS_AUTH_METHOD));
 
-    if(auth_err != AUTH_SUCCESS)
-    {
+    if(err){
         printk("Failed to init authentication service.\n");
         return;
     }
@@ -178,14 +167,8 @@ void main(void)
 
     printk("Peripheral Auth started\n");
 
-    while(true)
-    {
-        k_sleep(MSEC_PER_SEC * 5);
-
-        // loop forever
-        if(is_connected) {
-            printk("Sending test data.\n");
-            auth_svc_peripheral_tx(&auth_conn, test_data, sizeof(test_data));
-        }
+    while(true) {
+        /* give the handshake thread a chance to run */
+        k_yield();
     }
 }
