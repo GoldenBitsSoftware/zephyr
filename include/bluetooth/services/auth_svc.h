@@ -22,9 +22,10 @@
 extern "C" {
 #endif
 
+/* TODO: Add to Kconfig for BLE authentication service */
 //#define CONFIG_DTLS_AUTH_METHOD
-//#define CONFIG_CHALLENGE_RESP_AUTH_METHOD
-#define CONFIG_LOOPBACK_TEST    1
+#define CONFIG_CHALLENGE_RESP_AUTH_METHOD
+//#define CONFIG_LOOPBACK_TEST    1
 
 /**
  * Should be large enoough to hold one TLS record
@@ -61,15 +62,12 @@ extern "C" {
  *  Authentication status enums
  */
  typedef enum  {
-     AUTH_STAT_STARTED,
-     AUTH_STAT_TLS_CERT_INVALID,
-     AUTH_STAT_TLS_KEY_EXCHANGE,
-     AUTH_STAT_TLS_SIGNATURE_FAILED,
-     AUTH_STAT_CHALLENGE_FAILED,
-     AUTH_STAT_NO_RESPONSE,
-     AUTH_STAT_CANCELED,
-     AUTH_STAT_FAILED,
-     AUTH_STAT_SUCCESSFUL
+     AUTH_STATUS_STARTED,
+     AUTH_STATUS_IN_PROCESS,
+     AUTH_STATUS_CANCELED,
+     AUTH_STATUS_FAILED,      /* an internal failure of some type */
+     AUTH_STATUS_AUTHENTICATION_FAILED,
+     AUTH_STATUS_SUCCESSFUL
  } auth_status_t;
 
 
@@ -91,7 +89,7 @@ struct authenticate_conn;
  /**
   * Authentication callback status function
   */
-typedef void (*k_auth_status_cb_t)(struct authenticate_conn *auth_conn, auth_status_t status, void *context);
+typedef void (*auth_status_cb_t)(struct authenticate_conn *auth_conn, auth_status_t status, void *context);
 
 
 struct authenticate_conn
@@ -109,7 +107,7 @@ struct authenticate_conn
     auth_status_t curr_status;
 
     // status callback func
-    k_auth_status_cb_t status_cb_func;
+    auth_status_cb_t status_cb_func;
     void *callback_context;
 
     // thread stuff'
@@ -169,7 +167,7 @@ struct auth_connection_params
 // called on kernel init.  ARre you client or server?
 // set MTU to large chunk
 int auth_svc_init(struct authenticate_conn *auth_con, struct auth_connection_params *con_params,
-                          k_auth_status_cb_t status_func, void *context, uint32_t auth_flags );
+                          auth_status_cb_t status_func, void *context, uint32_t auth_flags );
 
 // frees ups any allocated resouces
 int auth_svc_deinit(struct authenticate_conn *auth_con);

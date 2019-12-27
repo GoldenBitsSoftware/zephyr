@@ -36,29 +36,16 @@ LOG_MODULE_DECLARE(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
  */
 K_THREAD_STACK_DEFINE(auth_thread_stack_area_1, HANDSHAKE_THRD_STACK_SIZE);
 
-// forward declaration
+/* TODO: Move these to auth_svc.h and wrap in #define */
 void auth_dtls_thead(void *arg1, void *arg2, void *arg3);
 void auth_looback_thread(void *arg1, void *arg2, void *arg3);
+void auth_chalresp_thread(void *arg1, void *arg2, void *arg3);
 
 
 
 /* ========================== local functions ========================= */
 
 
-/* ======= internal function, not for external use API can change ===== */
-
-/**
- *
- * @param auth_con
- * @param status
- */
-void auth_internal_status_callback(struct authenticate_conn *auth_conn, auth_status_t status)
-{
-    if(auth_conn->status_cb_func)
-    {
-        auth_conn->status_cb_func(auth_conn, status, auth_conn->callback_context);
-    }
-}
 
 /*
  * Add ability to not use authentication attributes if using L2CAP.
@@ -74,7 +61,7 @@ void auth_internal_status_callback(struct authenticate_conn *auth_conn, auth_sta
 /* ========================= external API ============================ */
 
 int auth_svc_init(struct authenticate_conn *auth_con, struct auth_connection_params *con_params,
-                            k_auth_status_cb_t status_func, void *context, uint32_t auth_flags)
+                            auth_status_cb_t status_func, void *context, uint32_t auth_flags)
 {
     /* init the struct to zero */
     memset(auth_con, 0, sizeof(struct authenticate_conn));
@@ -112,14 +99,12 @@ int auth_svc_init(struct authenticate_conn *auth_con, struct auth_connection_par
 #endif
 
 #ifdef CONFIG_CHALLENGE_RESP_AUTH_METHOD
-    auth_con->auth_thread_func = NULL;
-    return AUTH_ERROR_INVALID_PARAM;  // not implmeneted
+    auth_con->auth_thread_func = auth_chalresp_thread;
 #endif
 
 #ifdef CONFIG_LOOPBACK_TEST
     auth_con->auth_thread_func = auth_looback_thread;
 #endif
-
 
     return AUTH_SUCCESS;
 }
@@ -136,11 +121,6 @@ int auth_svc_start(struct authenticate_conn *auth_conn)
                                           auth_conn->auth_thread_func, auth_conn, NULL, NULL, HANDSHAKE_THRD_PRIORITY,
                                            0,  // options
                                           K_NO_WAIT);
-
-
-    // status callback
-    auth_internal_status_callback(auth_conn, AUTH_STAT_STARTED);
-
 
     return AUTH_SUCCESS;
 }
