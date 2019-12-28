@@ -180,6 +180,15 @@ int auth_svc_status(void);
 
 int auth_svc_cancel(void);
 
+/**
+ * Helper routine to return string corresponding to status
+ *
+ * @param   status  Authentication status value.
+ *
+ * @return  Pointer to string representing the status.
+ */
+const char *auth_svc_getstatus_str(auth_status_t status);
+
 /// wait for completion w/timeout
 // 0 == wait forever
 int auth_svc_wait(struct authenticate_conn *auth_con, uint32_t timeoutMsec, auth_status_t *status);

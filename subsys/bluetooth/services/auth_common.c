@@ -21,6 +21,7 @@
 #include <bluetooth/gatt.h>
 #include <bluetooth/services/auth_svc.h>
 
+#include <logging/log_ctrl.h>
 #include <logging/log.h>
 LOG_MODULE_DECLARE(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 
@@ -158,6 +159,43 @@ int auth_svc_wait(struct authenticate_conn *auth_con, uint32_t timeoutMsec, auth
     return AUTH_ERROR_TIMEOUT;
 }
 
+/**
+ * @see auth_svc.h
+ */
+const char *auth_svc_getstatus_str(auth_status_t status)
+{
+    switch(status) {
+        case AUTH_STATUS_STARTED:
+            return "Authentication started";
+            break;
+
+        case AUTH_STATUS_IN_PROCESS:
+            return "In process";
+            break;
+
+        case AUTH_STATUS_CANCELED:
+            return "Canceled";
+            break;
+
+        case AUTH_STATUS_FAILED:
+            return "Failure";
+            break;
+
+        case AUTH_STATUS_AUTHENTICATION_FAILED:
+            return "Authentication Failed";
+            break;
+
+        case AUTH_STATUS_SUCCESSFUL:
+            return "Authentication Successful";
+            break;
+
+        default:
+            break;
+    }
+
+    return "unknown";
+}
+
 
 /* Routines to handle buffer io */
 
@@ -253,16 +291,24 @@ int auth_svc_buffer_put(struct auth_io_buffer *iobuf, const uint8_t *in_buf,  in
 
 int auth_svc_buffer_get_wait(struct auth_io_buffer *iobuf, uint8_t *out_buf,  int num_bytes, int waitmsec)
 {
+    /* return any bytes that might be sitting in the buffer */
+    int bytecount = auth_svc_buffer_get(iobuf, out_buf, num_bytes);
+
+    if(bytecount > 0) {
+        /* bytes are avail, return them */
+        return bytecount;
+    }
+
     int err = k_sem_take(&iobuf->buf_sem, K_MSEC(waitmsec));
 
     if(err) {
         return err;  /* timed out -EAGAIN or error */
     }
 
-    /* return byte count or error (err < 0) */
-    err = auth_svc_buffer_get(iobuf, out_buf, num_bytes);
+    /* return byte count or error (bytecount < 0) */
+    bytecount = auth_svc_buffer_get(iobuf, out_buf, num_bytes);
 
-    return err;
+    return bytecount;
 }
 
 
