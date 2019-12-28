@@ -495,8 +495,15 @@ static int tls_credential_add()
 
 static void auth_status(struct authenticate_conn *auth_conn, auth_status_t status, void *context)
 {
-    //
-    LOG_INF("Authentication process status: %d", status);
+    /* display status */
+    printk("Authentication process status: %s\n", auth_svc_getstatus_str(status));
+}
+
+static void process_log_msgs(void)
+{
+    while(log_process(false)) {
+        ;  /* intentionally empty statement */
+    }
 }
 
 void main(void)
@@ -546,10 +553,7 @@ void main(void)
     /* just spin while the BT modules handle the connection and authentiation */
     while(true) {
 
-        /* process log messages */
-        while(log_process(false)) {
-            ; /* intentionally empty */
-        }
+        process_log_msgs();
 
         /* Let the handshake thread run */
         k_yield();
