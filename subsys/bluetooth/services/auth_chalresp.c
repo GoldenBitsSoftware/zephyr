@@ -298,9 +298,9 @@ static bool auth_periph_recv_challenge(struct authenticate_conn *auth_conn, uint
     auth_chalresp_hash(chal.central_challenge, periph_resp.periph_response);
 
     /* Send response */
-    numbytes = auth_svc_peripheral_tx(auth_conn, (const unsigned char *)&chal, sizeof(chal));
+    numbytes = auth_svc_peripheral_tx(auth_conn, (const unsigned char *)&periph_resp, sizeof(periph_resp));
 
-    if((numbytes <= 0) || (numbytes != sizeof(chal))) {
+    if((numbytes <= 0) || (numbytes != sizeof(periph_resp))) {
         LOG_ERR("Failed to send challenge response to Central.");
         return false;
     }
@@ -315,6 +315,8 @@ static bool auth_periph_recv_chalresp(struct authenticate_conn *auth_conn, uint8
     struct auth_chalresp_result result_resp;
     uint8_t hash[AUTH_SHA256_HASH];
     int err, numbytes;
+
+    memset(&central_resp, 0, sizeof(central_resp));
 
     /* read just the header */
     if(!auth_periph_recv_msg(auth_conn, (uint8_t*)&central_resp, sizeof(central_resp.hdr))) {
@@ -342,7 +344,7 @@ static bool auth_periph_recv_chalresp(struct authenticate_conn *auth_conn, uint8
     /* The Central authenticated the Peripheral (this code) response. Now verify the Central's
      * response to the Peripheral challenge. */
     if(!auth_periph_recv_msg(auth_conn, (uint8_t*)&central_resp.hdr + sizeof(central_resp.hdr),
-                             sizeof(central_resp.hdr) - sizeof(central_resp.hdr))) {
+                             sizeof(central_resp) - sizeof(central_resp.hdr))) {
         LOG_ERR("Failed to read Central response.");
         *status = AUTH_STATUS_FAILED;
         return false;
