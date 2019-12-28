@@ -136,15 +136,14 @@ static void bt_ready(int err)
 
 static void auth_status(struct authenticate_conn *auth_conn, auth_status_t status, void *context)
 {
-    //
-    printk("Authentication process status: %d\n", status);
+    /* print out auth status */
+    printk("Authentication status: %s\n", auth_svc_getstatus_str(status));
 }
 
 
 void main(void)
 {
     int err;
-    uint8_t test_data[5] = {0xB, 0xE, 0xE, 0xF, 0x41};
 
     struct auth_connection_params con_params = {0};
 
