@@ -124,6 +124,15 @@ static int auth_chalresp_hash(const uint8_t *random_chal, uint8_t *hash)
     return err;
 }
 
+static bool auth_check_msg(struct chalresp_header *hdr, const uint8_t msg_id)
+{
+    if((hdr->soh != CHALLENGE_RESP_SOH) || (hdr->msg_id != msg_id)) {
+        return false;
+    }
+
+    return true;
+}
+
 #if defined(CONFIG_BT_GATT_CLIENT)
 
 static bool auth_central_send_challenge(struct authenticate_conn *auth_conn, const uint8_t *random_chal)
@@ -176,7 +185,7 @@ static bool auth_central_recv_chal_resp(struct authenticate_conn *auth_conn, con
     }
 
     /* check message */
-    if((perph_resp.hdr.soh != CHALLENGE_RESP_SOH) || (perph_resp.hdr.msg_id != AUTH_PERIPH_CHALRESP_MSG_ID) ) {
+    if(!auth_check_msg(&perph_resp.hd, AUTH_PERIPH_CHALRESP_MSG_ID)) {}
         LOG_ERR("Invalid message recieved from the peripheral.");
         *status = AUTH_STATUS_FAILED;
         return false;
@@ -244,7 +253,132 @@ static bool auth_central_recv_chal_resp(struct authenticate_conn *auth_conn, con
 
 #else
 
+static bool auth_periph_recv_msg(struct authenticate_conn *auth_conn, uint8_t *msgbuf, size_t msglen)
+{
+    int numbytes;
 
+    while((int)msglen > 0) {
+        numbytes = auth_svc_peripheral_recv_timeout(auth_conn, msgbuf, msglen, AUTH_RX_TIMEOUT_MSEC);
+
+        if(numbytes <= 0) {
+            return false;
+        }
+
+        msgbuf += numbytes;
+        msglen -= numbytes;
+    }
+
+    return true;
+}
+
+static bool auth_periph_recv_challenge(struct authenticate_conn *auth_conn, uint8_t *random_chal)
+{
+    struct central_challenge chal;
+    struct periph_chal_response periph_resp;
+    int numbytes;
+
+    if(!auth_periph_recv_msg(auth_conn, (uint8_t*)&chal, sizeof(chal))) {
+        LOG_ERR("Failed to recieve challenge message from Central");
+        return false;
+    }
+
+    if(!auth_check_msg(&chal.hdr, AUTH_CENTRAL_CHAL_MSG_ID)) {
+        LOG_ERR("Invalid message.");
+        return false;
+    }
+
+    /* create response and send back to the Central */
+    periph_resp.hdr.soh = CHALLENGE_RESP_SOH;
+    periph_resp.hdr.msg_id = AUTH_PERIPH_CHALRESP_MSG_ID;
+
+    /* copy the Peripheral's challenge for the Central */
+    memcpy(periph_resp.periph_challenge, random_chal, sizeof(periph_resp.periph_challenge));
+
+    /* Now create the response for the Central */
+    auth_chalresp_hash(chal.central_challenge, periph_resp.periph_response);
+
+    /* Send response */
+    numbytes = auth_svc_peripheral_tx(auth_conn, (const unsigned char *)&chal, sizeof(chal));
+
+    if((numbytes <= 0) || (numbytes != sizeof(chal))) {
+        LOG_ERR("Failed to send challenge response to Central.");
+        return false;
+    }
+
+    return true;
+}
+
+
+static bool auth_periph_recv_chalresp(struct authenticate_conn *auth_conn, uint8_t *random_chal, auth_status_t *status)
+{
+    struct central_chal_resp central_resp;
+    struct auth_chalresp_result result_resp;
+    uint8_t hash[AUTH_SHA256_HASH];
+    int err, numbytes;
+
+    /* read just the header */
+    if(!auth_periph_recv_msg(auth_conn, (uint8_t*)&central_resp, sizeof(central_resp.hdr))) {
+        LOG_ERR("Failed to recieve challenge response  from Central");
+        *status = AUTH_STATUS_FAILED;
+        return false;
+    }
+
+    /* This is a result message, means the Central failed to authenticate the Periphaerl*/
+    if(central_resp.hdr.msg_id == AUTH_CHALRESP_RESULT_MSG_ID) {
+
+        /* read the remainder of the message */
+        auth_periph_recv_msg(auth_conn, (uint8_t*)&result_resp.result, sizeof(result_resp.result));
+
+        /* Result should be non-zero, meaning an authentication failure. */
+        if(result_resp.result != 0) {
+            LOG_ERR("Unexpected result value: %d", result_resp.result);
+        }
+
+        LOG_ERR("Central authentication failed.");
+        *status = AUTH_STATUS_AUTHENTICATION_FAILED;
+        return false;
+    }
+
+    /* The Central authenticated the Peripheral (this code) response. Now verify the Central's
+     * response to the Peripheral challenge. */
+    if(!auth_periph_recv_msg(auth_conn, (uint8_t*)&central_resp.hdr + sizeof(central_resp.hdr),
+                             sizeof(central_resp.hdr) - sizeof(central_resp.hdr))) {
+        LOG_ERR("Failed to read Central response.");
+        *status = AUTH_STATUS_FAILED;
+        return false;
+    }
+
+    err = auth_chalresp_hash(random_chal, hash);
+    if(err) {
+        LOG_ERR("Failed to create hash.");
+        *status = AUTH_STATUS_FAILED;
+        return false;
+    }
+
+    /* init result response message */
+    memset(&result_resp, 0, sizeof(result_resp));
+    result_resp.hdr.soh = CHALLENGE_RESP_SOH;
+    result_resp.hdr.msg_id = AUTH_CHALRESP_RESULT_MSG_ID;
+
+    /* verify Central's response */
+    if(memcmp(hash, central_resp.central_response, sizeof(hash))) {
+        /* authenatication failed, the Central did not sent the correct response */
+        result_resp.result = 1;
+    }
+
+    /* send result back to the Central */
+    numbytes = auth_svc_peripheral_tx(auth_conn, (const unsigned char *)&result_resp, sizeof(result_resp));
+
+    if((numbytes <= 0) || (numbytes != sizeof(result_resp))) {
+        LOG_ERR("Failed to send Central authentication result.");
+        *status = AUTH_STATUS_FAILED;
+        return false;
+    }
+
+    *status = (result_resp.result == 0) ? AUTH_STATUS_SUCCESSFUL : AUTH_STATUS_AUTHENTICATION_FAILED;
+
+    return true;
+}
 
 
 #endif /* CONFIG_BT_GATT_CLIENT */
@@ -255,9 +389,7 @@ static bool auth_central_recv_chal_resp(struct authenticate_conn *auth_conn, con
  */
 void auth_chalresp_thread(void *arg1, void *arg2, void *arg3)
 {
-    int numbytes;
     auth_status_t status;
-    struct auth_chalresp_result periph_result;
     uint8_t random_chal[AUTH_CHALLENGE_LEN];
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)arg1;
 
@@ -268,10 +400,11 @@ void auth_chalresp_thread(void *arg1, void *arg2, void *arg3)
 
 #if defined(CONFIG_BT_GATT_CLIENT)
 
+    struct auth_chalresp_result periph_result;
 
     /* if central, generate random num and send challenge */
     if(!auth_conn->is_central) {
-        LOG_ERR("Incorrect configuration, should be central.");
+        LOG_ERR("Incorrect configuration, should be Central.");
         auth_chalresp_status(auth_conn, AUTH_STATUS_FAILED);
         return;  /* exit thread */
     }
@@ -298,7 +431,7 @@ void auth_chalresp_thread(void *arg1, void *arg2, void *arg3)
     }
 
     /* check message */
-    if((periph_result.hdr.soh != CHALLENGE_RESP_SOH) || (periph_result.hdr.msg_id != AUTH_CHALRESP_RESULT_MSG_ID)) {
+    if(!auth_check_msg(&periph_result.hdr, AUTH_CHALRESP_RESULT_MSG_ID) {
         LOG_ERR("Peripheral rejected Central response, authentication failed.");
         auth_chalresp_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
         return;
@@ -317,11 +450,34 @@ void auth_chalresp_thread(void *arg1, void *arg2, void *arg3)
 
 #else
 
+    /* Check code is configured to run as a Peripheral */
+    if(auth_conn->is_central) {
+        LOG_ERR("Incorrect configuration, should be Peripheral.");
+        auth_chalresp_status(auth_conn, AUTH_STATUS_FAILED);
+        return;
+    }
+
+    /* Wait for challenge from the Central */
+    if(!auth_periph_recv_challenge(auth_conn, random_chal)) {
+        auth_chalresp_status(auth_conn, AUTH_STATUS_FAILED);
+        return;
+    }
+
+    /* Wait for challenge response from the Central */
+    auth_periph_recv_chalresp(auth_conn, random_chal, &status);
+
+    if(status == AUTH_STATUS_SUCCESSFUL) {
+        LOG_INF("Authentication with Central successful.");
+    } else {
+        LOG_INF("Authentication with Central failed.");
+    }
+
+    auth_chalresp_status(auth_conn, status);
 
 #endif /* CONFIG_BT_GATT_CLIENT */
 
-
-
+    /* End of Challenge-Response authentication thread */
+    LOG_DBG("Challenge-Response thread complete.");
 }
 
 
