@@ -236,7 +236,7 @@ static bool auth_central_recv_chal_resp(struct authenticate_conn *auth_conn, con
         *status = AUTH_STATUS_FAILED;
         return false;
      }
-
+     
      /* send Central's response to the Peripheral's random challenge */
      numbytes = auth_svc_central_tx(auth_conn, (const unsigned char*)&central_resp, sizeof(central_resp));
 
@@ -442,10 +442,10 @@ void auth_chalresp_thread(void *arg1, void *arg2, void *arg3)
 
     /* check the Peripheral result */
     if(periph_result.result != 0) {
-        LOG_ERR("Authentication with peripherl failed.");
+        LOG_ERR("Authentication with peripheral failed.");
         auth_chalresp_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
     } else {
-        LOG_INF("Authentication with peripherl successful.");
+        LOG_INF("Authentication with peripheral successful.");
         auth_chalresp_status(auth_conn, AUTH_STATUS_SUCCESSFUL);
     }
 
