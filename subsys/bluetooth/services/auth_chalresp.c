@@ -185,7 +185,7 @@ static bool auth_central_recv_chal_resp(struct authenticate_conn *auth_conn, con
     }
 
     /* check message */
-    if(!auth_check_msg(&perph_resp.hd, AUTH_PERIPH_CHALRESP_MSG_ID)) {}
+    if(!auth_check_msg(&perph_resp.hdr, AUTH_PERIPH_CHALRESP_MSG_ID)) {
         LOG_ERR("Invalid message recieved from the peripheral.");
         *status = AUTH_STATUS_FAILED;
         return false;
@@ -400,6 +400,7 @@ void auth_chalresp_thread(void *arg1, void *arg2, void *arg3)
 
 #if defined(CONFIG_BT_GATT_CLIENT)
 
+    int numbytes;
     struct auth_chalresp_result periph_result;
 
     /* if central, generate random num and send challenge */
@@ -431,7 +432,7 @@ void auth_chalresp_thread(void *arg1, void *arg2, void *arg3)
     }
 
     /* check message */
-    if(!auth_check_msg(&periph_result.hdr, AUTH_CHALRESP_RESULT_MSG_ID) {
+    if(!auth_check_msg(&periph_result.hdr, AUTH_CHALRESP_RESULT_MSG_ID)) {
         LOG_ERR("Peripheral rejected Central response, authentication failed.");
         auth_chalresp_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
         return;
