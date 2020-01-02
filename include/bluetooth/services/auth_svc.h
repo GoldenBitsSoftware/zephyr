@@ -32,7 +32,7 @@ extern "C" {
  */
 #define CENTRAL_RX_BUFFER_LEN               500
 
-#define BLE_LINK_HEADER_BYTES               (2u + 1u)  /* two bytes for header, not sure about extra byte */
+#define BLE_LINK_HEADER_BYTES               (2u + 1u)  /**< two bytes for header, not sure about extra byte */
 
 
 #define AUTH_SUCCESS                        0
@@ -64,6 +64,7 @@ extern "C" {
  typedef enum  {
      AUTH_STATUS_STARTED,
      AUTH_STATUS_IN_PROCESS,
+     AUTH_STATUS_CANCEL_PENDING,   /* Authentication is stopping */
      AUTH_STATUS_CANCELED,
      AUTH_STATUS_FAILED,      /* an internal failure of some type */
      AUTH_STATUS_AUTHENTICATION_FAILED,
@@ -84,6 +85,7 @@ extern "C" {
     uint8_t io_buffer[AUTH_SVC_IOBUF_LEN];
  };
 
+ /* Forward declaration */
 struct authenticate_conn;
 
  /**
@@ -92,6 +94,11 @@ struct authenticate_conn;
 typedef void (*auth_status_cb_t)(struct authenticate_conn *auth_conn, auth_status_t status, void *context);
 
 
+/**
+ * @brief  Used to manage one authentication session with peer.  It is possible
+ *         to have multiple concurrent authentication sessions. For example if
+ *         a device is acting as a Central and Peripheral concurrently.
+ */
 struct authenticate_conn
 {
     struct bt_conn *conn;
@@ -129,11 +136,11 @@ struct authenticate_conn
 
     volatile u8_t write_att_err;
 
-    /* Server characteritic handle, used by the Central to send
+    /* Server characteristic handle, used by the Central to send
      * authentication messages to the Peripheral */
     uint16_t server_char_handle;
 
-    uint16_t payload_size;  /* BLE Link MTUless struct bt_att_write_req */
+    uint16_t payload_size;  /* BLE Link MTU less struct bt_att_write_req */
 
     /* Attributes, these should be used by the Peripheral, not used by the Central. */
     const struct bt_gatt_attr *auth_svc_attr;    /* service attribute */
@@ -152,32 +159,53 @@ struct authenticate_conn
     // TLS context?
 };
 
-struct auth_connection_params
-{
-    uint8_t *buf;
-    uint32_t mtu_size;
-    bool use_l2cap;
-
-    uint32_t timeout;
-
-};
 
 
-// setup certs, underlying IO funcs
-// called on kernel init.  ARre you client or server?
-// set MTU to large chunk
+/**
+ *  Initializes authentication service.
+ *
+ * @param auth_con     Authentication connection struct, initialized by this call.
+ * @param con_params   (DROP THIS?) Optional connection params.
+ * @param status_func  Status function callback.
+ * @param context      Optional context used in status calllback.
+ * @param auth_flags   Authentication flags.
+ *
+ * @return 0 on success else one of AUTH_ERROR_* values.
+ */
 int auth_svc_init(struct authenticate_conn *auth_con, struct auth_connection_params *con_params,
                           auth_status_cb_t status_func, void *context, uint32_t auth_flags );
 
-// frees ups any allocated resouces
+/**
+ * Frees up any previously allocated resources.
+ *
+ * @param auth_con  Authentication connection struct.
+ *
+ * @return  0 on success else one of AUTH_ERROR_* values.
+ */
 int auth_svc_deinit(struct authenticate_conn *auth_con);
 
-// optional callback w/status
+/**
+ * Starts the authentication process
+ *
+ * @param auth_con  Authentication connection struct.
+ *
+ * @return  0 on success else one of AUTH_ERROR_* values.
+ */
 int auth_svc_start(struct authenticate_conn *auth_con);
 
-// returns auth status
-int auth_svc_status(void);
+/**
+ * Returns the current status of the authentication process.
+ *
+ * @return One of AUTH_STATUS_*
+ */
+auth_status_t auth_svc_status(void);
 
+/**
+ * Cancels the authentication process.  Must wait until the AUTH_STATUS_CANCELED
+ * status is returned.
+ *
+ * @return One of AUTH_STATUS_*
+ */
 int auth_svc_cancel(void);
 
 /**
@@ -189,49 +217,17 @@ int auth_svc_cancel(void);
  */
 const char *auth_svc_getstatus_str(auth_status_t status);
 
-/// wait for completion w/timeout
-// 0 == wait forever
-int auth_svc_wait(struct authenticate_conn *auth_con, uint32_t timeoutMsec, auth_status_t *status);
-
-int auth_svc_get_peripheral_attributes(struct authenticate_conn *auth_con);
 
 /**
- * Routines to read/write from Authentication service attributes
+ * Function to block until authentication is complete or a timeout has occuured.
+ *
+ * @param auth_con       Authentication connection struct.
+ * @param timeout_mec    Time to wait in msecs, 0 == wait forever.
+ * @param status         Status returned in var.
+ *
+ * @return  0 on success else one of AUTH_ERROR_* values.
  */
-
-/*  called when central receives data from the peripheral.  Callback function set in
- * bt_gatt_subscribe_parsm structure when calling bt_gatt_subscribe() */
-u8_t auth_svc_gatt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
-                                  const void *data, u16_t length);
-
-
-int auth_svc_central_tx(void *ctx, const unsigned char *buf, size_t len);
-int auth_svc_central_recv(void *ctx, unsigned char *buf, size_t len);
-int auth_svc_central_recv_timeout(void *ctx, unsigned char *buf, size_t len, uint32_t timeout);
-int auth_svc_peripheral_tx(void *ctx, const unsigned char *buf, size_t len);
-int auth_svc_peripheral_recv(void *ctx,unsigned char *buf, size_t len);
-int auth_svc_peripheral_recv_timeout(void *ctx, unsigned char *buf, size_t len, uint32_t timeout);
-
-
-/**
- * Routines to read/write over L2CAP
- */
-int auth_svc_tx_l2cap(void *ctx, const unsigned char *buf, size_t len);
-int auth_svc_recv_l2cap(void *ctx, unsigned char *buf, size_t len);
-int auth_svc_recv_over_l2cap_timeout(void *ctx, unsigned char *buf,
-                                     size_t len, uint32_t timeout);
-
-
-/**
- * Buffer routines
- */
-int auth_svc_buffer_init(struct auth_io_buffer *iobuf);
-int auth_svc_buffer_put(struct auth_io_buffer *iobuf, const uint8_t *in_buf,  int num_bytes);
-int auth_svc_buffer_get(struct auth_io_buffer *iobuf, uint8_t *out_buf,  int num_bytes);
-int auth_svc_buffer_get_wait(struct auth_io_buffer *iobuf, uint8_t *out_buf,  int num_bytes, int waitmsec);
-int auth_svc_buffer_bytecount(struct auth_io_buffer *iobuf);
-bool auth_svc_buffer_isfull(struct auth_io_buffer *iobuf);
-int auth_svc_buffer_clear(struct auth_io_buffer *iobuf);
+int auth_svc_wait(struct authenticate_conn *auth_con, uint32_t timeout_mec, auth_status_t *status);
 
 
 

@@ -23,12 +23,14 @@ LOG_MODULE_REGISTER(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 
 #include <bluetooth/services/auth_svc.h>
 
+#include "auth_internal.h"
+
 
 
 #if defined(CONFIG_BT_GATT_CLIENT)
 
 /**
- * Called when Central receives data from the peripheral
+ * @see auth_internal.h
  */
 u8_t auth_svc_gatt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
                                    const void *data, u16_t length)
@@ -60,6 +62,9 @@ u8_t auth_svc_gatt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe
 }
 
 
+/**
+ * @see auth_internal.h
+ */
 int auth_svc_central_recv(void *ctx, unsigned char *buf, size_t len)
 {
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
@@ -70,7 +75,9 @@ int auth_svc_central_recv(void *ctx, unsigned char *buf, size_t len)
     return err;
 }
 
-
+/**
+ * @see auth_internal.h
+ */
 int auth_svc_central_recv_timeout(void *ctx, unsigned char *buf, size_t len, uint32_t timeout_msec)
 {
     int err = 0;
@@ -81,6 +88,9 @@ int auth_svc_central_recv_timeout(void *ctx, unsigned char *buf, size_t len, uin
     return err;
 }
 
+/**
+ * @see auth_internal.h
+ */
 static void gatt_central_write_cb(struct bt_conn *conn, u8_t err, struct bt_gatt_write_params *params)
 {
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)bt_con_get_context(conn);
@@ -96,6 +106,9 @@ static void gatt_central_write_cb(struct bt_conn *conn, u8_t err, struct bt_gatt
     k_sem_give(&auth_conn->auth_central_write_sem);
 }
 
+/**
+ * @see auth_internal.h
+ */
 int auth_svc_central_tx(void *ctx, const unsigned char *buf, size_t len)
 {
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
@@ -149,12 +162,12 @@ int auth_svc_central_tx(void *ctx, const unsigned char *buf, size_t len)
 #endif  /* CONFIG_BT_GATT_CLIENT */
 
 /**
- * Called when central has ACK'd receiving data
+ * Called when the Central has ACK'd receiving data
  * Function is called in the System workqueue context
  *
- * @param conn
- * @param attr
- * @param err
+ * @param conn   BLE connection
+ * @param attr   Attribute
+ * @param err    GATT error
  */
 static void auth_svc_peripheral_indicate(struct bt_conn *conn,
                                                const struct bt_gatt_attr *attr,
@@ -169,6 +182,9 @@ static void auth_svc_peripheral_indicate(struct bt_conn *conn,
     k_sem_give(&auth_conn->auth_indicate_sem);
 }
 
+/**
+ * @see auth_internal.h
+ */
 int auth_svc_peripheral_tx(void *ctx, const unsigned char *buf, size_t len)
 {
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
@@ -235,7 +251,9 @@ int auth_svc_peripheral_tx(void *ctx, const unsigned char *buf, size_t len)
     return ret;
 }
 
-
+/**
+ * @see auth_internal.h
+ */
 int auth_svc_peripheral_recv_timeout(void *ctx, unsigned char *buf, size_t len, uint32_t timeout)
 {
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
@@ -245,6 +263,9 @@ int auth_svc_peripheral_recv_timeout(void *ctx, unsigned char *buf, size_t len, 
     return err;
 }
 
+/**
+ * @see auth_internal.h
+ */
 int auth_svc_peripheral_recv(void *ctx,unsigned char *buf, size_t len)
 {
     int err = auth_svc_peripheral_recv_timeout(ctx, buf, len, K_NO_WAIT);
@@ -253,8 +274,12 @@ int auth_svc_peripheral_recv(void *ctx,unsigned char *buf, size_t len)
 }
 
 
-
-//client_ccc_cfg_changed
+/**
+ * Called when client notification is (dis)enabled by the Central
+ *
+ * @param attr    GATT attribute.
+ * @param value   BT_GATT_CCC_NOTIFY if changes are notified.
+ */
 static void client_ccc_cfg_changed(const struct bt_gatt_attr *attr, u16_t value)
 {
     ARG_UNUSED(attr);
@@ -267,14 +292,15 @@ static void client_ccc_cfg_changed(const struct bt_gatt_attr *attr, u16_t value)
 
 
 /**
- * Write from client
+ *  Write callback function when Central writes to Peripheral characteristic.
  *
- * @param conn
- * @param attr
- * @param buf
- * @param len
+ * @param conn    BLE connection struct.
+ * @param attr    Attribute written to.
+ * @param buf     Bytes written
+ * @param len     Number of bytes.
  * @param offset
  * @param flags
+ *
  * @return
  */
 static ssize_t client_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
@@ -324,8 +350,7 @@ BT_GATT_SERVICE_DEFINE(auth_svc,
 );
 
 /**
-*
-* @return
+* @see auth_internal.h
  */
 int auth_svc_get_peripheral_attributes(struct authenticate_conn *auth_con)
 {

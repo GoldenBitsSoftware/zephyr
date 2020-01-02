@@ -25,6 +25,8 @@
 #include <logging/log.h>
 LOG_MODULE_DECLARE(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 
+#include "auth_internal.h"
+
 
 #define HANDSHAKE_THRD_STACK_SIZE       1024
 #define HANDSHAKE_THRD_PRIORITY         0
@@ -61,6 +63,10 @@ void auth_chalresp_thread(void *arg1, void *arg2, void *arg3);
 
 /* ========================= external API ============================ */
 
+
+/**
+ * @see auth_svc.h
+ */
 int auth_svc_init(struct authenticate_conn *auth_con, struct auth_connection_params *con_params,
                             auth_status_cb_t status_func, void *context, uint32_t auth_flags)
 {
@@ -112,7 +118,9 @@ int auth_svc_init(struct authenticate_conn *auth_con, struct auth_connection_par
 
 
 
-// optional callback w/status
+/**
+ * @see auth_svc.h
+ */
 int auth_svc_start(struct authenticate_conn *auth_conn)
 {
 
@@ -127,11 +135,7 @@ int auth_svc_start(struct authenticate_conn *auth_conn)
 }
 
 /**
- * Returns success if handshake complete
- *
- * @param auth_con
- * @param timeoutMsec
- * @return
+ * @see auth_svc.h
  */
 int auth_svc_wait(struct authenticate_conn *auth_con, uint32_t timeoutMsec, auth_status_t *status)
 {
@@ -200,9 +204,7 @@ const char *auth_svc_getstatus_str(auth_status_t status)
 /* Routines to handle buffer io */
 
 /**
- *
- * @param iobuf
- * @return
+ * @see auth_internal.h
  */
 int auth_svc_buffer_init(struct auth_io_buffer *iobuf)
 {
@@ -220,7 +222,7 @@ int auth_svc_buffer_init(struct auth_io_buffer *iobuf)
 }
 
 /**
- *
+ * @see auth_internal.h
  */
 int auth_svc_buffer_put(struct auth_io_buffer *iobuf, const uint8_t *in_buf,  int num_bytes)
 {
@@ -289,6 +291,9 @@ int auth_svc_buffer_put(struct auth_io_buffer *iobuf, const uint8_t *in_buf,  in
     return (int)total_copied;
 }
 
+/**
+ * @see auth_internal.h
+ */
 int auth_svc_buffer_get_wait(struct auth_io_buffer *iobuf, uint8_t *out_buf,  int num_bytes, int waitmsec)
 {
     /* return any bytes that might be sitting in the buffer */
@@ -312,6 +317,9 @@ int auth_svc_buffer_get_wait(struct auth_io_buffer *iobuf, uint8_t *out_buf,  in
 }
 
 
+/**
+ * @see auth_internal.h
+ */
 int auth_svc_buffer_get(struct auth_io_buffer *iobuf, uint8_t *out_buf,  int num_bytes)
 {
     // if no valid bytes, just return zero
@@ -382,6 +390,9 @@ int auth_svc_buffer_get(struct auth_io_buffer *iobuf, uint8_t *out_buf,  int num
     return (int)total_copied;
 }
 
+/**
+ * @see auth_internal.h
+ */
 int auth_svc_buffer_bytecount(struct auth_io_buffer *iobuf)
 {
     int err = k_mutex_lock(&iobuf->buf_mutex, K_FOREVER);
@@ -396,11 +407,17 @@ int auth_svc_buffer_bytecount(struct auth_io_buffer *iobuf)
     return err;
 }
 
+/**
+ * @see auth_internal.h
+ */
 bool auth_svc_buffer_isfull(struct auth_io_buffer *iobuf)
 {
     return (auth_svc_buffer_bytecount(iobuf) == AUTH_SVC_IOBUF_LEN) ? true : false;
 }
 
+/**
+ * @see auth_internal.h
+ */
 int auth_svc_buffer_clear(struct auth_io_buffer *iobuf) {
 
     int err = k_mutex_lock(&iobuf->buf_mutex, K_FOREVER);
