@@ -19,6 +19,8 @@
 #include <bluetooth/conn.h>
 #include <bluetooth/uuid.h>
 #include <bluetooth/gatt.h>
+#include <logging/log.h>
+#include <logging/log_ctrl.h>
 
 #include <bluetooth/services/auth_svc.h>
 
@@ -140,12 +142,21 @@ static void auth_status(struct authenticate_conn *auth_conn, auth_status_t statu
     printk("Authentication status: %s\n", auth_svc_getstatus_str(status));
 }
 
+static void process_log_msgs(void)
+{
+    while(log_process(false)) {
+        ;  /* intentionally empty statement */
+    }
+}
+
 
 void main(void)
 {
     int err;
 
     struct auth_connection_params con_params = {0};
+
+    log_init();
 
     err = auth_svc_init(&auth_conn, &con_params, auth_status, NULL, (AUTH_CONN_PERIPHERAL|AUTH_CONN_DTLS_AUTH_METHOD));
 
@@ -167,6 +178,9 @@ void main(void)
     printk("Peripheral Auth started\n");
 
     while(true) {
+
+        process_log_msgs();
+
         /* give the handshake thread a chance to run */
         k_yield();
     }
