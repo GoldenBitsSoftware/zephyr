@@ -42,6 +42,8 @@
 #include <logging/log.h>
 LOG_MODULE_DECLARE(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 
+#include "auth_internal.h"
+
 #define MAX_MBEDTLS_CONTEXT     5
 
 /**

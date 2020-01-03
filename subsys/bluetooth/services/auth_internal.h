@@ -23,20 +23,6 @@ int auth_svc_get_peripheral_attributes(struct authenticate_conn *auth_con);
  * Routines to read/write from Authentication service attributes
  */
 
-/**  Called when central receives data from the peripheral.  Callback function set in
- * bt_gatt_subscribe_parsm structure when calling bt_gatt_subscribe()
- *
- * @param conn      BLE connection struct.
- * @param params    GATT subscription params.
- * @param data      Pointer to data bytes received from the Peripheral.
- * @param length    Number of bytes received
- *
- * @return  BT_GATT_ITER_STOP to unsubscribe from peripheral Notifications/Indications.
- *          BT_GATT_ITER_CONTINUE  to continue receiving Notifications/Indications.
- */
-u8_t auth_svc_gatt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
-                                  const void *data, u16_t length);
-
 
 /**
  *  Used by the Central to send data bytes to the Peripheral.  Also used as MbedTLS

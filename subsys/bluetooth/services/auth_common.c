@@ -67,8 +67,7 @@ void auth_chalresp_thread(void *arg1, void *arg2, void *arg3);
 /**
  * @see auth_svc.h
  */
-int auth_svc_init(struct authenticate_conn *auth_con, struct auth_connection_params *con_params,
-                            auth_status_cb_t status_func, void *context, uint32_t auth_flags)
+int auth_svc_init(struct authenticate_conn *auth_con, auth_status_cb_t status_func, void *context, uint32_t auth_flags)
 {
     /* init the struct to zero */
     memset(auth_con, 0, sizeof(struct authenticate_conn));

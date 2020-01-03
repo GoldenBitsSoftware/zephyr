@@ -27,6 +27,8 @@
 #include <logging/log.h>
 LOG_MODULE_DECLARE(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 
+#include "auth_internal.h"
+
 #define AUTH_SHA256_HASH                    (32u)
 #define AUTH_SHARED_KEY_LEN                 (32u)
 #define AUTH_CHALLENGE_LEN                  (32u)

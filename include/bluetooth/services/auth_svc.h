@@ -172,8 +172,8 @@ struct authenticate_conn
  *
  * @return 0 on success else one of AUTH_ERROR_* values.
  */
-int auth_svc_init(struct authenticate_conn *auth_con, struct auth_connection_params *con_params,
-                          auth_status_cb_t status_func, void *context, uint32_t auth_flags );
+int auth_svc_init(struct authenticate_conn *auth_con,
+                  auth_status_cb_t status_func, void *context, uint32_t auth_flags );
 
 /**
  * Frees up any previously allocated resources.
@@ -229,7 +229,19 @@ const char *auth_svc_getstatus_str(auth_status_t status);
  */
 int auth_svc_wait(struct authenticate_conn *auth_con, uint32_t timeout_mec, auth_status_t *status);
 
-
+/**  Called when central receives data from the peripheral.  Callback function set in
+ * bt_gatt_subscribe_parsm structure when calling bt_gatt_subscribe()
+ *
+ * @param conn      BLE connection struct.
+ * @param params    GATT subscription params.
+ * @param data      Pointer to data bytes received from the Peripheral.
+ * @param length    Number of bytes received
+ *
+ * @return  BT_GATT_ITER_STOP to unsubscribe from peripheral Notifications/Indications.
+ *          BT_GATT_ITER_CONTINUE  to continue receiving Notifications/Indications.
+ */
+u8_t auth_svc_gatt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
+                                  const void *data, u16_t length);
 
 
 #ifdef __cplusplus
