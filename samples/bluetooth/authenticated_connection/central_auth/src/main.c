@@ -508,12 +508,6 @@ static void process_log_msgs(void)
 
 void main(void)
 {
-
-    struct auth_connection_params con_params = {0};
-
-    // TBD, not used just yet
-    memset(&central_auth_conn, 0, sizeof(central_auth_conn));
-
     log_init();
 
     LOG_INF("Central Auth started.");
@@ -524,7 +518,7 @@ void main(void)
     tls_credential_add();
 
 
-    int err = auth_svc_init(&central_auth_conn, &con_params, auth_status, NULL, (AUTH_CONN_CENTRAL|AUTH_CONN_DTLS_AUTH_METHOD));
+    int err = auth_svc_init(&central_auth_conn, auth_status, NULL, (AUTH_CONN_CENTRAL|AUTH_CONN_DTLS_AUTH_METHOD));
 
 
     if(err) {
