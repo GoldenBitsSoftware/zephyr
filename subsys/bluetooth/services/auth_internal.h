@@ -12,11 +12,21 @@
 /**
  *  Used by peripheral code to get the service attributes.
  *
- * @param auth_con  Pointer to Authentication connection struct.
+ * @param auth_conn  Pointer to Authentication connection struct.
  *
  * @return  0 on success else one of AUTH_ERROR_* values.
  */
-int auth_svc_get_peripheral_attributes(struct authenticate_conn *auth_con);
+int auth_svc_get_peripheral_attributes(struct authenticate_conn *auth_conn);
+
+
+/**
+ * Starts the authentication thread.
+ *
+ * @param auth_conn Pointer to Authentication connection struct.
+ *
+ * @return  0 on success else one of AUTH_ERROR_* values.
+ */
+int auth_svc_start_thread(struct authenticate_conn *auth_conn);
 
 
 /**
@@ -104,6 +114,18 @@ int auth_svc_peripheral_recv(void *ctx,unsigned char *buf, size_t len);
  */
 int auth_svc_peripheral_recv_timeout(void *ctx, unsigned char *buf, size_t len, uint32_t timeout);
 
+
+/**
+ * Initialize authentication L2CAP layer.
+ *
+ * @param auth_conn  Pointer to Authentication connection struct.
+ *
+ * @return  0 on success else negative error value including one of AUTH_ERROR_* values.
+ */
+int auth_svc_l2cap_init(struct authenticate_conn *auth_conn);
+
+
+int auth_svc_l2cap_connect( struct authenticate_conn *auth_conn);
 
 /**
  * Routines to read/write over L2CAP

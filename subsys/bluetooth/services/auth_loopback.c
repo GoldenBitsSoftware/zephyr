@@ -17,6 +17,7 @@
 #include <bluetooth/conn.h>
 #include <bluetooth/uuid.h>
 #include <bluetooth/gatt.h>
+#include <bluetooth/l2cap.h>
 
 #define LOG_LEVEL CONFIG_BT_GATT_AUTHS_LOG_LEVEL
 #include <logging/log.h>
