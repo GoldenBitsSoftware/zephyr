@@ -19,6 +19,7 @@
 #include <bluetooth/conn.h>
 #include <bluetooth/uuid.h>
 #include <bluetooth/gatt.h>
+#include <bluetooth/l2cap.h>
 #include <bluetooth/services/auth_svc.h>
 
 #include <logging/log_ctrl.h>
@@ -48,7 +49,48 @@ void auth_chalresp_thread(void *arg1, void *arg2, void *arg3);
 
 /* ========================== local functions ========================= */
 
+static bool auth_svc_checkflags(uint32_t flags)
+{
+    /* stub for now */
+    /* TODO: Add code to check for conflicting flags */
 
+    return true;
+}
+
+
+/**
+ * Invokes the status callback from the system work queue
+ *
+ * @param work Pointer to wor item.
+ */
+static void auth_svc_status_work(struct k_work *work)
+{
+    struct authenticate_conn *auth_conn =
+           CONTAINER_OF(work, struct authenticate_conn, auth_status_work);
+
+    if(!auth_conn) {
+        LOG_ERR("Failed to get auth conn struct.");
+        return;
+    }
+
+    /* invoke callback */
+    auth_conn->status_cb(auth_conn, auth_conn->curr_status, auth_conn->callback_context);
+}
+
+
+/* ========================= Internal  API ============================ */
+
+int auth_svc_start_thread(struct authenticate_conn *auth_conn)
+{
+    // TODO:  Get thread stack from stack pool?
+    auth_conn->auth_tid = k_thread_create(&auth_conn->auth_thrd_data, auth_thread_stack_area_1,
+                                          K_THREAD_STACK_SIZEOF(auth_thread_stack_area_1),
+                                          auth_conn->auth_thread_func, auth_conn, NULL, NULL, HANDSHAKE_THRD_PRIORITY,
+                                          0,  // options
+                                          K_NO_WAIT);
+
+    return AUTH_SUCCESS;
+}
 
 /*
  * Add ability to not use authentication attributes if using L2CAP.
@@ -67,49 +109,67 @@ void auth_chalresp_thread(void *arg1, void *arg2, void *arg3);
 /**
  * @see auth_svc.h
  */
-int auth_svc_init(struct authenticate_conn *auth_con, auth_status_cb_t status_func, void *context, uint32_t auth_flags)
+int auth_svc_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_func, void *context, uint32_t auth_flags)
 {
+    /* check input params */
+    if(status_func == NULL) {
+        LOG_ERR("Error, status function is NULL.");
+        return AUTH_ERROR_INVALID_PARAM;
+    }
+
+    /* check auth flags */
+    if(!auth_svc_checkflags(auth_flags)) {
+        LOG_ERR("Invalid auth flags.");
+        return AUTH_ERROR_INVALID_PARAM;
+    }
+
     /* init the struct to zero */
-    memset(auth_con, 0, sizeof(struct authenticate_conn));
+    memset(auth_conn, 0, sizeof(struct authenticate_conn));
 
     /* init mutexes */
-    k_sem_init(&auth_con->auth_handshake_sem, 0, 1);
-    k_sem_init(&auth_con->auth_indicate_sem, 0, 1);
-    k_sem_init(&auth_con->auth_central_write_sem, 0, 1);
+    k_sem_init(&auth_conn->auth_indicate_sem, 0, 1);
+    k_sem_init(&auth_conn->auth_central_write_sem, 0, 1);
 
     // setup the status callback
-    auth_con->status_cb_func = status_func;
-    auth_con->callback_context = context;
+    auth_conn->status_cb = status_func;
+    auth_conn->callback_context = context;
 
-    auth_con->is_central = (auth_flags & AUTH_CONN_CENTRAL) ? true : false;
+    /* init the work item used to post authentication status */
+    k_work_init(&auth_conn->auth_status_work, auth_svc_status_work);
 
-    if(auth_flags & AUTH_CONN_USE_L2CAP)
-    {
-        auth_con->use_gatt_attributes = false;
-    }
-    else
-    {
-        auth_con->use_gatt_attributes = true;
+    auth_conn->is_central = (auth_flags & AUTH_CONN_CENTRAL) ? true : false;
+
+    if(auth_flags & AUTH_CONN_USE_L2CAP) {
+        auth_conn->use_gatt_attributes = false;
+
+        /* init auth L2CAP layer */
+        int err = auth_svc_l2cap_init(auth_conn);
+
+        if(err) {
+            LOG_ERR("Failed to initialize authentication service over L2CAP, err: %d", err);
+            return err;
+        }
+    } else {
+        auth_conn->use_gatt_attributes = true;
     }
 
     /* Initialize RX buffer */
-    auth_svc_buffer_init(&auth_con->rx_buf);
-
+    auth_svc_buffer_init(&auth_conn->rx_buf);
 
 
 #ifdef CONFIG_DTLS_AUTH_METHOD
-    auth_con->auth_thread_func = auth_dtls_thead;
+    auth_conn->auth_thread_func = auth_dtls_thead;
 
     // init TLS layer
-    auth_init_dtls_method(auth_con)
+    auth_init_dtls_method(auth_conn);
 #endif
 
 #ifdef CONFIG_CHALLENGE_RESP_AUTH_METHOD
-    auth_con->auth_thread_func = auth_chalresp_thread;
+    auth_conn->auth_thread_func = auth_chalresp_thread;
 #endif
 
 #ifdef CONFIG_LOOPBACK_TEST
-    auth_con->auth_thread_func = auth_looback_thread;
+    auth_conn->auth_thread_func = auth_looback_thread;
 #endif
 
     return AUTH_SUCCESS;
@@ -123,44 +183,27 @@ int auth_svc_init(struct authenticate_conn *auth_con, auth_status_cb_t status_fu
 int auth_svc_start(struct authenticate_conn *auth_conn)
 {
 
-    // TODO:  Get thread stack from stack pool?
-    auth_conn->auth_tid = k_thread_create(&auth_conn->auth_thrd_data, auth_thread_stack_area_1,
-                                          K_THREAD_STACK_SIZEOF(auth_thread_stack_area_1),
-                                          auth_conn->auth_thread_func, auth_conn, NULL, NULL, HANDSHAKE_THRD_PRIORITY,
-                                           0,  // options
-                                          K_NO_WAIT);
+    /* If using L2CAP interface, create a channel first */
+    if(!auth_conn->use_gatt_attributes) {
+
+        /* after successful connection, auth thread is started */
+        return auth_svc_l2cap_connect(auth_conn);
+    }
+
+    /* Start the authentication thread */
+    int err = auth_svc_start_thread(auth_conn);
+
+    if(err) {
+        LOG_ERR("Failed to start authentication thread, err: %d", err);
+
+        auth_svc_set_status(auth_conn, AUTH_STATUS_FAILED);
+    }
+
 
     return AUTH_SUCCESS;
 }
 
-/**
- * @see auth_svc.h
- */
-int auth_svc_wait(struct authenticate_conn *auth_con, uint32_t timeoutMsec, auth_status_t *status)
-{
-    int ret;
 
-    /* check input params */
-    if(auth_con == NULL || status == NULL)
-    {
-        return AUTH_ERROR_INVALID_PARAM;
-    }
-
-    ret = k_sem_take(&auth_con->auth_handshake_sem, timeoutMsec);
-
-    /* Auth process has completed, return success */
-    if(ret == 0)
-    {
-        k_sem_give(&auth_con->auth_handshake_sem);
-        *status = auth_con->curr_status;
-        return AUTH_SUCCESS;
-    }
-
-    *status = auth_con->curr_status;
-
-    // return timeout error
-    return AUTH_ERROR_TIMEOUT;
-}
 
 /**
  * @see auth_svc.h
@@ -198,6 +241,29 @@ const char *auth_svc_getstatus_str(auth_status_t status)
 
     return "unknown";
 }
+
+/**
+ * @see auth_svc.h
+ */
+auth_status_t auth_svc_get_status(struct authenticate_conn *auth_conn)
+{
+    return auth_conn->curr_status;
+}
+
+/**
+ * @see auth_svc.h
+ */
+void auth_svc_set_status(struct authenticate_conn *auth_conn, auth_status_t status)
+{
+    auth_conn->curr_status = status;
+
+    if(auth_conn->status_cb) {
+
+        /* submit work item */
+        k_work_submit(&auth_conn->auth_status_work);
+    }
+}
+
 
 
 /* Routines to handle buffer io */

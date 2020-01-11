@@ -54,6 +54,13 @@ extern "C" {
 #define AUTH_CONN_CHALLENGE_AUTH_METHOD     0x0008
 #define AUTH_CONN_USE_L2CAP                 0x0010
 
+/**
+ * L2CAP PSM numbers
+ * 0x01 - 0x3F are reseved
+ *
+ */
+#define AUTH_L2CAP_CHANNEL_PSM              0x85  /* hopefully doesn't conflict w/anything */
+
 /* Log module for the BLE authentication service. */
 #define AUTH_SERVICE_LOG_MODULE             auth_svc
 
@@ -110,12 +117,16 @@ struct authenticate_conn
 
     bool is_central;  /* True if connection is for central role */
 
-    // current status of the authentication process
+    /* current status of the authentication process */
     auth_status_t curr_status;
 
-    // status callback func
-    auth_status_cb_t status_cb_func;
+    /* status callback func */
+    auth_status_cb_t status_cb;
     void *callback_context;
+
+    /* Work queue used to return status. Important if authentication
+     * status changes/fails in an ISR context */
+    struct k_work auth_status_work;
 
     // thread stuff'
     k_tid_t auth_tid;  // handshake thread id
@@ -123,9 +134,6 @@ struct authenticate_conn
 
     /* authentication thread for this connection */
     k_thread_entry_t auth_thread_func;
-
-    // semaphore to optionally wait on handshake completion
-    struct k_sem auth_handshake_sem;
 
     /* Semaphore used when waiting for write (for central) to complete */
     struct k_sem auth_central_write_sem;
@@ -148,15 +156,20 @@ struct authenticate_conn
     const struct bt_gatt_attr *auth_server_attr; /* Server attribute */
 
 
-    // BLE L2CAP info
+    /* BLE L2CAP info */
+    struct bt_l2cap_le_chan l2cap_channel;
+
+    /* Timer when connecting L2CAP channel. If channel not connected by
+     * N number of seconds, then timeout error status is returned */
+    struct k_timer chan_connect_timer;
 
     /* IO buffer used by the Central and Peripheral */
     struct auth_io_buffer rx_buf;
 
-    // Pointer to internal details, do not touch!!!
+    /* Pointer to internal details, do not touch!!! */
     void *internal_obj;
 
-    // TLS context?
+    /* TLS context? */
 };
 
 
@@ -164,7 +177,7 @@ struct authenticate_conn
 /**
  *  Initializes authentication service.
  *
- * @param auth_con     Authentication connection struct, initialized by this call.
+ * @param auth_conn     Authentication connection struct, initialized by this call.
  * @param con_params   (DROP THIS?) Optional connection params.
  * @param status_func  Status function callback.
  * @param context      Optional context used in status calllback.
@@ -172,41 +185,55 @@ struct authenticate_conn
  *
  * @return 0 on success else one of AUTH_ERROR_* values.
  */
-int auth_svc_init(struct authenticate_conn *auth_con,
+int auth_svc_init(struct authenticate_conn *auth_conn,
                   auth_status_cb_t status_func, void *context, uint32_t auth_flags );
 
 /**
  * Frees up any previously allocated resources.
  *
- * @param auth_con  Authentication connection struct.
+ * @param auth_conn  Authentication connection struct.
  *
  * @return  0 on success else one of AUTH_ERROR_* values.
  */
-int auth_svc_deinit(struct authenticate_conn *auth_con);
+int auth_svc_deinit(struct authenticate_conn *auth_conn);
 
 /**
  * Starts the authentication process
  *
- * @param auth_con  Authentication connection struct.
+ * @param auth_conn  Authentication connection struct.
  *
  * @return  0 on success else one of AUTH_ERROR_* values.
  */
-int auth_svc_start(struct authenticate_conn *auth_con);
+int auth_svc_start(struct authenticate_conn *auth_conn);
 
 /**
  * Returns the current status of the authentication process.
  *
+ * @param auth_conn  Authentication connection struct.
+ *
  * @return One of AUTH_STATUS_*
  */
-auth_status_t auth_svc_status(void);
+auth_status_t auth_svc_get_status(struct authenticate_conn *auth_conn);
+
+
+/**
+ * Set the current authentication status, will also invoke the callback
+ * to post status to the calling code.
+ *
+ * @param auth_conn   Authentication connection struct.
+ * @param status      Authentication status.
+ */
+void auth_svc_set_status(struct authenticate_conn *auth_conn, auth_status_t status);
 
 /**
  * Cancels the authentication process.  Must wait until the AUTH_STATUS_CANCELED
  * status is returned.
  *
+ * @param auth_conn  Authentication connection struct.
+ *
  * @return One of AUTH_STATUS_*
  */
-int auth_svc_cancel(void);
+int auth_svc_cancel(struct authenticate_conn *auth_conn);
 
 /**
  * Helper routine to return string corresponding to status
@@ -218,16 +245,6 @@ int auth_svc_cancel(void);
 const char *auth_svc_getstatus_str(auth_status_t status);
 
 
-/**
- * Function to block until authentication is complete or a timeout has occuured.
- *
- * @param auth_con       Authentication connection struct.
- * @param timeout_mec    Time to wait in msecs, 0 == wait forever.
- * @param status         Status returned in var.
- *
- * @return  0 on success else one of AUTH_ERROR_* values.
- */
-int auth_svc_wait(struct authenticate_conn *auth_con, uint32_t timeout_mec, auth_status_t *status);
 
 /**  Called when central receives data from the peripheral.  Callback function set in
  * bt_gatt_subscribe_parsm structure when calling bt_gatt_subscribe()
