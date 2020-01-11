@@ -17,6 +17,7 @@
 #include <bluetooth/conn.h>
 #include <bluetooth/uuid.h>
 #include <bluetooth/gatt.h>
+#include <bluetooth/l2cap.h>
 #include <bluetooth/services/auth_svc.h>
 
 #if defined(CONFIG_MBEDTLS)
@@ -290,10 +291,6 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3)
     //     AUTH_FAILED,
     //     AUTH_SUCCESSFUL
     //auth_internal_status_callback(struct authenticate_conn *auth_con , auth_status_t status)
-
-    // give semaphore, any threads waiting for handshake to complete will be
-    // woken up.
-    k_sem_give(&auth_conn->auth_handshake_sem);
 
 }
 
