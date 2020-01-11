@@ -16,6 +16,7 @@
 #include <bluetooth/conn.h>
 #include <bluetooth/uuid.h>
 #include <bluetooth/gatt.h>
+#include <bluetooth/l2cap.h>
 #include <bluetooth/services/auth_svc.h>
 #include <random/rand32.h>
 
@@ -90,13 +91,6 @@ static uint8_t shared_key[AUTH_SHARED_KEY_LEN] = {
     0xBD, 0x84, 0xDC, 0x6E, 0x5C, 0x77, 0x41, 0x58, 0xE8, 0xFB, 0x1D, 0xB9, 0x95, 0x39, 0x20, 0xE4,
     0xC5, 0x03, 0x69, 0x9D, 0xBC, 0x53, 0x08, 0x20, 0x1E, 0xF4, 0x72, 0x8E, 0x90, 0x56, 0x49, 0xA8 };
 
-
-static void auth_chalresp_status(struct authenticate_conn *auth_conn, auth_status_t status)
-{
-     if(auth_conn->status_cb_func != NULL) {
-         auth_conn->status_cb_func(auth_conn, status, auth_conn->callback_context);
-     }
-}
 
 /**
  * Utility function to create the has of the random challenge and the shared key.
@@ -397,7 +391,7 @@ void auth_chalresp_thread(void *arg1, void *arg2, void *arg3)
     uint8_t random_chal[AUTH_CHALLENGE_LEN];
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)arg1;
 
-    auth_chalresp_status(auth_conn, AUTH_STATUS_STARTED);
+    auth_svc_set_status(auth_conn, AUTH_STATUS_STARTED);
 
     /* generate random number as challenge */
     sys_rand_get(random_chal, sizeof(random_chal));
@@ -410,18 +404,18 @@ void auth_chalresp_thread(void *arg1, void *arg2, void *arg3)
     /* if central, generate random num and send challenge */
     if(!auth_conn->is_central) {
         LOG_ERR("Incorrect configuration, should be Central.");
-        auth_chalresp_status(auth_conn, AUTH_STATUS_FAILED);
+        auth_svc_set_status(auth_conn, AUTH_STATUS_FAILED);
         return;  /* exit thread */
     }
 
     if(!auth_central_send_challenge(auth_conn, random_chal)) {
-        auth_chalresp_status(auth_conn, AUTH_STATUS_FAILED);
+        auth_svc_set_status(auth_conn, AUTH_STATUS_FAILED);
         return;
     }
 
     /* read response from peripheral */
     if(!auth_central_recv_chal_resp(auth_conn, random_chal, &status)) {
-        auth_chalresp_status(auth_conn, status);
+        auth_svc_set_status(auth_conn, status);
         return;
     }
 
@@ -431,24 +425,24 @@ void auth_chalresp_thread(void *arg1, void *arg2, void *arg3)
 
     if((numbytes <= 0) || (numbytes != sizeof(periph_result))) {
         LOG_ERR("Failed to receive peripheral authentication result.");
-        auth_chalresp_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
+        auth_svc_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
         return;
     }
 
     /* check message */
     if(!auth_check_msg(&periph_result.hdr, AUTH_CHALRESP_RESULT_MSG_ID)) {
         LOG_ERR("Peripheral rejected Central response, authentication failed.");
-        auth_chalresp_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
+        auth_svc_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
         return;
     }
 
     /* check the Peripheral result */
     if(periph_result.result != 0) {
         LOG_ERR("Authentication with peripheral failed.");
-        auth_chalresp_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
+        auth_svc_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
     } else {
         LOG_INF("Authentication with peripheral successful.");
-        auth_chalresp_status(auth_conn, AUTH_STATUS_SUCCESSFUL);
+        auth_svc_set_status(auth_conn, AUTH_STATUS_SUCCESSFUL);
     }
 
     /* exit thread */
@@ -458,13 +452,13 @@ void auth_chalresp_thread(void *arg1, void *arg2, void *arg3)
     /* Check code is configured to run as a Peripheral */
     if(auth_conn->is_central) {
         LOG_ERR("Incorrect configuration, should be Peripheral.");
-        auth_chalresp_status(auth_conn, AUTH_STATUS_FAILED);
+        auth_svc_set_status(auth_conn, AUTH_STATUS_FAILED);
         return;
     }
 
     /* Wait for challenge from the Central */
     if(!auth_periph_recv_challenge(auth_conn, random_chal)) {
-        auth_chalresp_status(auth_conn, AUTH_STATUS_FAILED);
+        auth_svc_set_status(auth_conn, AUTH_STATUS_FAILED);
         return;
     }
 
@@ -477,7 +471,7 @@ void auth_chalresp_thread(void *arg1, void *arg2, void *arg3)
         LOG_INF("Authentication with Central failed.");
     }
 
-    auth_chalresp_status(auth_conn, status);
+    auth_svc_set_status(auth_conn, status);
 
 #endif /* CONFIG_BT_GATT_CLIENT */
 
