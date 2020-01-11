@@ -22,14 +22,14 @@
 #include <bluetooth/conn.h>
 #include <bluetooth/uuid.h>
 #include <bluetooth/gatt.h>
-#include <sys/byteorder.h>
+#include <bluetooth/l2cap.h>
 #include <logging/log.h>
 #include <logging/log_ctrl.h>
 
 #include <bluetooth/services/auth_svc.h>
 
 
-LOG_MODULE_REGISTER(central_auth,  CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
+LOG_MODULE_REGISTER(central_auth, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 
 
 #define PORT	DT_ALIAS_SW0_GPIOS_CONTROLLER
