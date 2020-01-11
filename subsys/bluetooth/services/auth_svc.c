@@ -16,6 +16,7 @@
 #include <bluetooth/conn.h>
 #include <bluetooth/uuid.h>
 #include <bluetooth/gatt.h>
+#include <bluetooth/l2cap.h>
 
 #define LOG_LEVEL CONFIG_BT_GATT_AUTHS_LOG_LEVEL
 #include <logging/log.h>
@@ -352,13 +353,13 @@ BT_GATT_SERVICE_DEFINE(auth_svc,
 /**
 * @see auth_internal.h
  */
-int auth_svc_get_peripheral_attributes(struct authenticate_conn *auth_con)
+int auth_svc_get_peripheral_attributes(struct authenticate_conn *auth_conn)
 {
-    auth_con->auth_svc_attr = &auth_svc.attrs[0];
+    auth_conn->auth_svc_attr = &auth_svc.attrs[0];
 
-    auth_con->auth_client_attr = &auth_svc.attrs[1];
+    auth_conn->auth_client_attr = &auth_svc.attrs[1];
 
-    auth_con->auth_server_attr = &auth_svc.attrs[2];
+    auth_conn->auth_server_attr = &auth_svc.attrs[2];
 
     return AUTH_SUCCESS;
 }
