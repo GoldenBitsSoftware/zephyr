@@ -19,6 +19,7 @@
 #include <bluetooth/conn.h>
 #include <bluetooth/uuid.h>
 #include <bluetooth/gatt.h>
+#include <bluetooth/l2cap.h>
 #include <logging/log.h>
 #include <logging/log_ctrl.h>
 
@@ -59,9 +60,6 @@ static void connected(struct bt_conn *conn, u8_t err)
         auth_conn.conn = default_conn;
 
         bt_conn_set_context(conn, &auth_conn);
-
-        /* After connecting, get the perpiheral GATT attributes */
-        auth_svc_get_peripheral_attributes(&auth_conn);
 
         is_connected = true;
 
@@ -152,13 +150,12 @@ static void process_log_msgs(void)
 
 void main(void)
 {
-    int err;
-
-    struct auth_connection_params con_params = {0};
-
     log_init();
 
-    err = auth_svc_init(&auth_conn, &con_params, auth_status, NULL, (AUTH_CONN_PERIPHERAL|AUTH_CONN_DTLS_AUTH_METHOD));
+    uint32_t auth_flags = AUTH_CONN_PERIPHERAL|AUTH_CONN_DTLS_AUTH_METHOD;
+    auth_flags |= AUTH_CONN_USE_L2CAP;
+
+    int err = auth_svc_init(&auth_conn, auth_status, NULL, auth_flags);
 
     if(err){
         printk("Failed to init authentication service.\n");
