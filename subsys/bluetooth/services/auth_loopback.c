@@ -25,6 +25,8 @@ LOG_MODULE_DECLARE(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 
 #include <bluetooth/services/auth_svc.h>
 
+#include "auth_internal.h"
+
 
 
 #ifdef CONFIG_LOOPBACK_TEST
@@ -99,7 +101,6 @@ static int auth_periph_rx(struct authenticate_conn *conn, uint8_t *buf, size_t l
 void auth_looback_thread(void *arg1, void *arg2, void *arg3)
 {
     int numbytes;
-    uint32_t test_len = 100;
     uint8_t test_data[TEST_DATA_LEN];
     uint8_t recv_test_data[TEST_DATA_LEN];
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)arg1;
@@ -108,6 +109,8 @@ void auth_looback_thread(void *arg1, void *arg2, void *arg3)
     memset(test_data, 0x41, sizeof(test_data));
 
 #if defined(CONFIG_BT_GATT_CLIENT)
+
+    uint32_t test_len = TEST_DATA_LEN / 2;
     if(auth_conn->is_central) {
 
         numbytes = auth_central_tx(auth_conn, test_data, test_len);
