@@ -125,13 +125,68 @@ int auth_svc_peripheral_recv_timeout(void *ctx, unsigned char *buf, size_t len, 
 int auth_svc_l2cap_init(struct authenticate_conn *auth_conn);
 
 
+#if defined(CONFIG_BT_GATT_CLIENT)
+/**
+ * Initiates a L2CAP channel connection with peripheral. Only used by client.
+ *
+ * @param auth_conn Pointer to Authentication connection struct.
+ *
+ * @return  0 on success else negative error value including one of AUTH_ERROR_* values.
+ */
 int auth_svc_l2cap_connect( struct authenticate_conn *auth_conn);
+
+#else
+
+/**
+ * Used by peripheral to register to accept L2CAP channel from a central.
+ *
+ * @param auth_conn Pointer to Authentication connection struct.
+ *
+ * @return  0 on success else negative error value including one of AUTH_ERROR_* values.
+ */
+int auth_svc_l2cap_register(struct authenticate_conn *auth_conn);
+
+#endif
+
 
 /**
  * Routines to read/write over L2CAP
  */
+
+/**
+ * Send data over L2CAP channel.   * Also used as MbedTLS BIO function.
+ *
+ * @param ctx  Context, pointer to Authentication connection struct.
+ * @param buf  Buffer to copy bytes into.
+ * @param len  Number of bytes requested.
+ *
+ * @return Number of bytes sent, 0 if no bytes, of negative if an error occurred.
+ */
 int auth_svc_tx_l2cap(void *ctx, const unsigned char *buf, size_t len);
+
+/**
+ * Receive data from L2CAP channel.
+ * Also used as MbedTLS BIO function.
+ *
+ * @param ctx  Context, pointer to Authentication connection struct.
+ * @param buf  Buffer to copy bytes into.
+ * @param len  Number of bytes requested.
+ *
+ * @return Number of bytes returned, 0 if no bytes, of negative if an error occurred.
+ */
 int auth_svc_recv_l2cap(void *ctx, unsigned char *buf, size_t len);
+
+/**
+ * Receive data from L2CAP channel with timeout, blocking call.
+ * Also used as MbedTLS BIO function.
+ *
+ * @param ctx  Context, pointer to Authentication connection struct.
+ * @param buf  Buffer to copy bytes into.
+ * @param len  Number of bytes requested.
+ * @param timeout  Wait time in msecs for data, K_FOREVER or K_NO_WAIT.
+ *
+ * @return  Number of bytes returned, or -EAGAIN if timed out.
+ */
 int auth_svc_recv_over_l2cap_timeout(void *ctx, unsigned char *buf,
                                      size_t len, uint32_t timeout);
 
@@ -172,7 +227,7 @@ int auth_svc_buffer_put(struct auth_io_buffer *iobuf, const uint8_t *in_buf,  in
  * @return  Number of bytes copied, can be less than requested.
  *          Negative number on error.
  */
-int auth_svc_buffer_get(struct auth_io_buffer *iobuf, uint8_t *out_buf,  int num_bytes);
+int auth_svc_buffer_get(struct auth_io_buffer *iobuf, uint8_t *out_buf, int num_bytes);
 
 /**
  * Gets number of bytes from the buffer, optionally waiting.

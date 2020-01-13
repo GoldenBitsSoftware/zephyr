@@ -24,8 +24,8 @@ extern "C" {
 
 /* TODO: Add to Kconfig for BLE authentication service */
 //#define CONFIG_DTLS_AUTH_METHOD
-#define CONFIG_CHALLENGE_RESP_AUTH_METHOD
-//#define CONFIG_LOOPBACK_TEST    1
+//#define CONFIG_CHALLENGE_RESP_AUTH_METHOD
+#define CONFIG_LOOPBACK_TEST    1
 
 /**
  * Should be large enoough to hold one TLS record
@@ -155,13 +155,18 @@ struct authenticate_conn
     const struct bt_gatt_attr *auth_client_attr; /* Client attribute */
     const struct bt_gatt_attr *auth_server_attr; /* Server attribute */
 
-
-    /* BLE L2CAP info */
+    /* BLE L2CAP channel, used by server and client */
     struct bt_l2cap_le_chan l2cap_channel;
 
+#if defined(CONFIG_BT_GATT_CLIENT)
     /* Timer when connecting L2CAP channel. If channel not connected by
      * N number of seconds, then timeout error status is returned */
     struct k_timer chan_connect_timer;
+#else
+
+    /* used by server to wait for channel connection */
+    struct bt_l2cap_server l2cap_server;
+#endif
 
     /* IO buffer used by the Central and Peripheral */
     struct auth_io_buffer rx_buf;

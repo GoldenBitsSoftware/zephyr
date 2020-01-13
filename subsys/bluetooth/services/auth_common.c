@@ -182,16 +182,37 @@ int auth_svc_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_f
  */
 int auth_svc_start(struct authenticate_conn *auth_conn)
 {
+    int err;
 
     /* If using L2CAP interface, create a channel first */
     if(!auth_conn->use_gatt_attributes) {
 
+#if defined(CONFIG_BT_GATT_CLIENT)
         /* after successful connection, auth thread is started */
-        return auth_svc_l2cap_connect(auth_conn);
+        err = auth_svc_l2cap_connect(auth_conn);
+#else
+        /* register a L2CAP server, and wait for channel connection */
+        err = auth_svc_l2cap_register(auth_conn);
+#endif
+
+        if(err) {
+            LOG_ERR("Failed to setup L2CAP channel, err: %d", err);
+        }
+
+        return err;
+    }
+
+    /* The BLE connection should be completed */
+    if(!auth_conn->is_central) {
+        err = auth_svc_get_peripheral_attributes(auth_conn);
+
+        if(err) {
+            LOG_ERR("Failed to get peripheral attributes");
+        }
     }
 
     /* Start the authentication thread */
-    int err = auth_svc_start_thread(auth_conn);
+    err = auth_svc_start_thread(auth_conn);
 
     if(err) {
         LOG_ERR("Failed to start authentication thread, err: %d", err);
