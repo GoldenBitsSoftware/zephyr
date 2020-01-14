@@ -110,7 +110,7 @@ void auth_looback_thread(void *arg1, void *arg2, void *arg3)
 
 #if defined(CONFIG_BT_GATT_CLIENT)
 
-    uint32_t test_len = TEST_DATA_LEN / 2;
+    uint32_t test_len = TEST_DATA_LEN;
     if(auth_conn->is_central) {
 
         numbytes = auth_central_tx(auth_conn, test_data, test_len);
@@ -149,6 +149,11 @@ void auth_looback_thread(void *arg1, void *arg2, void *arg3)
                  }
 
                  rx_byte_count += numbytes;
+
+                 /* If zero bytes read, yield */
+                 if(numbytes == 0) {
+                     k_yield();
+                 }
              }
 
              if(numbytes < 0) {

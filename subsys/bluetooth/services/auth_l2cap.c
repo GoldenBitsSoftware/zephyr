@@ -155,6 +155,8 @@ static struct bt_l2cap_chan_ops auth_l2cap_ops = {
         .disconnected = auth_l2cap_disconnected,
 };
 
+
+#if !defined(CONFIG_BT_GATT_CLIENT)
 /**
  * Used by Peripheral to accept a channel connection.
  *
@@ -171,7 +173,7 @@ static int auth_l2cap_accept(struct bt_conn *conn, struct bt_l2cap_chan **chan)
 
     return 0;
 }
-
+#endif
 
 
 /* ==================== L2CAP I/O funcs ====================== */
@@ -233,7 +235,7 @@ int auth_svc_l2cap_register(struct authenticate_conn *auth_conn)
  */
 int auth_svc_tx_l2cap(void *ctx, const unsigned char *buf, size_t len)
 {
-    int ret = 0;
+    static int ret = 0;
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
 
     /* Get net buffer, buffer will be returned to the pool when
@@ -254,9 +256,15 @@ int auth_svc_tx_l2cap(void *ctx, const unsigned char *buf, size_t len)
         return -ENOMEM;
     }
 
+    /* copy data to send into buffer */
     net_buf_add_mem(tx_buf, buf, len);
 
     ret = bt_l2cap_chan_send(&auth_conn->l2cap_channel.chan, tx_buf);
+
+    /* if successful, then return number of bytes sent */
+    if(ret == 0) {
+        ret = (int)len;
+    }
 
     return ret;
 }
