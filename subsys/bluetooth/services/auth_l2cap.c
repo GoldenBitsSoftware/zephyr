@@ -110,14 +110,16 @@ static int auth_l2cap_recv(struct bt_l2cap_chan *chan, struct net_buf *buf)
         return 0;  /* TODO: is returning 0 correct here? */
     }
 
-    /* add data to receive buffer */
+    /* add data to receive buffer, returns number of bytes placed in the Rx buffer or
+     * negative error value. */
     int err = auth_svc_buffer_put(&auth_conn->rx_buf, (const uint8_t *)buf->b.data, buf->b.len);
 
-    /* TODO:  Should the buf be un referenced when done? Does the calling
-     *        code do this? */
+    /* @note  The buf is unreferenced by the calling code. */
 
-    if(err) {
+    if(err < 0) {
         LOG_ERR("Failed to save recv buffer, error: %d", err);
+    } else {
+        err = 0;  /* reutrn 0 for success */
     }
 
     return err;
@@ -146,6 +148,7 @@ static void auth_l2cap_disconnected(struct bt_l2cap_chan *chan)
 {
     /* stop auth process */
     /* TODO: */
+    LOG_INF("L2CAP Channel disconnected");
 }
 
 static struct bt_l2cap_chan_ops auth_l2cap_ops = {
@@ -168,6 +171,8 @@ static int auth_l2cap_accept(struct bt_conn *conn, struct bt_l2cap_chan **chan)
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)bt_con_get_context(conn);
 
     *chan = &auth_conn->l2cap_channel.chan;
+
+    LOG_INF("L2CAP channel created.");
 
     return 0;
 }
