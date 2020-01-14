@@ -268,9 +268,6 @@ static void connected(struct bt_conn *conn, u8_t conn_err)
         central_auth_conn.conn = conn;
         bt_conn_set_context(conn, &central_auth_conn);
 
-        /* set the max MTU */
-        mtu_parms.func = mtu_change_cb;
-        bt_gatt_exchange_mtu(conn, &mtu_parms);
 
         /* If connecting via L2CAP, no need to discover attibutes
         * just connect via L2CAP layer */
@@ -285,6 +282,10 @@ static void connected(struct bt_conn *conn, u8_t conn_err)
 
             return;
         }
+
+        /* set the max MTU, only for GATT interface */
+        mtu_parms.func = mtu_change_cb;
+        bt_gatt_exchange_mtu(conn, &mtu_parms);
 
         /* reset gatt discovery index */
         auth_desc_index = 0;
@@ -517,8 +518,9 @@ void main(void)
      */
     tls_credential_add();
 
-
-    int err = auth_svc_init(&central_auth_conn, auth_status, NULL, (AUTH_CONN_CENTRAL|AUTH_CONN_DTLS_AUTH_METHOD));
+    uint32_t flags = AUTH_CONN_CENTRAL|AUTH_CONN_DTLS_AUTH_METHOD;
+    flags |= AUTH_CONN_USE_L2CAP;
+    int err = auth_svc_init(&central_auth_conn, auth_status, NULL, flags);
 
 
     if(err) {
