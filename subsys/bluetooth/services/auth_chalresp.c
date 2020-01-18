@@ -259,7 +259,7 @@ static bool auth_periph_recv_msg(struct authenticate_conn *auth_conn, uint8_t *m
 
         // TODO: Add receive timeout function
        // numbytes = auth_svc_peripheral_recv_timeout(auth_conn, msgbuf, msglen, AUTH_RX_TIMEOUT_MSEC);
-       numbyes = auth_periph_rx(auth_conn, msgbuf, msglen);
+       numbytes = auth_periph_rx(auth_conn, msgbuf, msglen);
 
         if(numbytes <= 0) {
             return false;
@@ -299,7 +299,7 @@ static bool auth_periph_recv_challenge(struct authenticate_conn *auth_conn, uint
     auth_chalresp_hash(chal.central_challenge, periph_resp.periph_response);
 
     /* Send response */
-    numbytes = auth_periph_tx(auth_conn, (const unsigned char *)&periph_resp, sizeof(periph_resp));
+    numbytes = auth_periph_tx(auth_conn, (uint8_t *)&periph_resp, sizeof(periph_resp));
 
     if((numbytes <= 0) || (numbytes != sizeof(periph_resp))) {
         LOG_ERR("Failed to send challenge response to Central.");
@@ -370,7 +370,7 @@ static bool auth_periph_recv_chalresp(struct authenticate_conn *auth_conn, uint8
     }
 
     /* send result back to the Central */
-    numbytes = auth_periph_tx(auth_conn, (const unsigned char *)&result_resp, sizeof(result_resp));
+    numbytes = auth_periph_tx(auth_conn, (uint8_t*)&result_resp, sizeof(result_resp));
 
     if((numbytes <= 0) || (numbytes != sizeof(result_resp))) {
         LOG_ERR("Failed to send Central authentication result.");
