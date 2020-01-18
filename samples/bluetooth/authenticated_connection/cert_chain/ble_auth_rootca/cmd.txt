@@ -1,0 +1,15 @@
+#
+#  Command used to create self signed BLE Authentication Test CA
+#
+
+openssl x509 -req -days 12775 -in bleauthrootca.csr -extfile ca_config -extensions v3_ca  -signkey private/bleauthrootca.key.pem -out bleauth.rootca.crt
+
+# 
+# Command to create an ECC 256 bit key pair
+#
+openssl ecparam -name prime256v1 -genkey -out bleauthrootca.key.pem
+
+#
+# Command to create a CSR (Certificate Signing Request) for the BLE Auth root
+#
+openssl req -new -sha256 -key private/bleauthrootca.key.pem -out bleauthrootca.csr

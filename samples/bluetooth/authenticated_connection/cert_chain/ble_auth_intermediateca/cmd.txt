@@ -1,0 +1,12 @@
+#
+# Command to create end device cert
+#
+
+openssl ca -config signer.config -extensions device_cert -in ../ble_auth_device/bleauth_device1.csr -out bleauth_device1.crt
+
+#
+# Command to create Intermediate CA
+#  Run from root ca directory
+#
+openssl ca -config ca_config -extensions v3_intermediate_ca -in ../ble_auth_intermediateca/bleauth_interca.csr -out bleauth_interca.crt
+
