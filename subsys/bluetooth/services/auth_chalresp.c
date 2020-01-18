@@ -168,8 +168,6 @@ static bool auth_central_recv_chal_resp(struct authenticate_conn *auth_conn, con
 
     while(len > 0) {
 
-        // TODO:  Add receive timeout function
-       // numbytes = auth_svc_central_recv_timeout(auth_conn, buf, len, AUTH_RX_TIMEOUT_MSEC);
        numbytes = auth_central_rx(auth_conn, buf, len);
 
         if(numbytes <= 0) {
