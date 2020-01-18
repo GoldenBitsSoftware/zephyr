@@ -24,8 +24,8 @@ extern "C" {
 
 /* TODO: Add to Kconfig for BLE authentication service */
 //#define CONFIG_DTLS_AUTH_METHOD
-//#define CONFIG_CHALLENGE_RESP_AUTH_METHOD
-#define CONFIG_LOOPBACK_TEST    1
+#define CONFIG_CHALLENGE_RESP_AUTH_METHOD
+//#define CONFIG_LOOPBACK_TEST    1
 
 /**
  * Should be large enoough to hold one TLS record
@@ -81,6 +81,9 @@ extern "C" {
 
 #define AUTH_SVC_IOBUF_LEN      (300u)
 
+ /**
+  * @brief Circular buffer used to save received data.
+  */
  struct auth_io_buffer {
     struct k_mutex buf_mutex;
     struct k_sem buf_sem;
