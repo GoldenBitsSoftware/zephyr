@@ -316,11 +316,9 @@ int auth_central_rx(struct authenticate_conn *conn, uint8_t *buf, size_t rxbytes
 {
     int err;
     if(conn->use_gatt_attributes) {
-        err = auth_svc_central_recv_timeout(conn, buf, rxbytes, 3000);
+        err = auth_svc_central_recv_timeout(conn, buf, rxbytes, AUTH_SVC_IO_TIMEOUT_MSEC);
     } else {
-        err =  auth_svc_recv_l2cap(conn, buf, rxbytes);
-        // int auth_svc_recv_over_l2cap_timeout(void *ctx, unsigned char *buf,
-        //                                     size_t len, uint32_t timeout);
+        err = auth_svc_recv_over_l2cap_timeout(conn, buf, rxbytes, AUTH_SVC_IO_TIMEOUT_MSEC);
     }
 
     return err;
@@ -350,11 +348,9 @@ int auth_periph_rx(struct authenticate_conn *conn, uint8_t *buf, size_t len)
     int err;
 
     if(conn->use_gatt_attributes) {
-        err = auth_svc_peripheral_recv_timeout(conn, buf, len, 3000);
+        err = auth_svc_peripheral_recv_timeout(conn, buf, len, AUTH_SVC_IO_TIMEOUT_MSEC);
     } else {
-        err = auth_svc_recv_l2cap(conn, buf, len);
-        // int auth_svc_recv_over_l2cap_timeout(void *ctx, unsigned char *buf,
-        //                                     size_t len, uint32_t timeout);
+        err = auth_svc_recv_over_l2cap_timeout(conn, buf, len, AUTH_SVC_IO_TIMEOUT_MSEC);
     }
 
     return err;

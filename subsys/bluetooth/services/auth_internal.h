@@ -8,6 +8,11 @@
 #ifndef ZEPHYR_INCLUDE_AUTH_INTERNAL_H_
 #define ZEPHYR_INCLUDE_AUTH_INTERNAL_H_
 
+/**
+ * @brief  Timeout in Msec when waiting for GATT or L2CAP read/write to complete.
+ */
+#define AUTH_SVC_IO_TIMEOUT_MSEC            (3000u)
+
 
 /**
  *  Used by peripheral code to get the service attributes.
