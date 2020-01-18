@@ -190,6 +190,55 @@ int auth_svc_recv_l2cap(void *ctx, unsigned char *buf, size_t len);
 int auth_svc_recv_over_l2cap_timeout(void *ctx, unsigned char *buf,
                                      size_t len, uint32_t timeout);
 
+/**
+ * Used by the Central to send data to Peripheral.  Uses either GATT or L2CAP
+ * interface depending on the configuration.
+ *
+ * @param conn  Pointer to Authentication connection struct.
+ * @param data  Data to send.
+ * @param len   Byte length of data.
+ *
+ * @return Number of bytes sent, negative number on error.
+ */
+int auth_central_tx(struct authenticate_conn *conn, uint8_t *data, size_t len);
+
+/**
+ * Used by the Central to receive data to Peripheral.  Uses either GATT or L2CAP
+ * interface depending on the configuration.
+ *
+ * @param conn     Pointer to Authentication connection struct.
+ * @param buf      Buffer to copy received bytes into.
+ * @param rxbytes  Number of bytes requested.
+ *
+ * @return Number of bytes copied into the buffer. On error, negative error number.
+ */
+int auth_central_rx(struct authenticate_conn *conn, uint8_t *buf, size_t rxbytes);
+
+/**
+ * Used by Peripheral to send data to the Central. Uses either GATT or L2CAP
+ * interface depending on the configuration.
+ *
+ * @param conn  Pointer to Authentication connection struct.
+ * @param data  Data to send.
+ * @param len   Byte length of data.
+ *
+ * @return Number of bytes sent, negative number on error.
+ */
+int auth_periph_tx(struct authenticate_conn *conn, uint8_t *data, size_t len);
+
+/**
+ * Used by Peripheral to receive data. Uses either GATT or L2CAP
+ * interface depending on the configuration.
+ *
+ * @param conn  Pointer to Authentication connection struct.
+ * @param buf   Buffer to copy received bytes into.
+ * @param len   Number of bytes requested.
+ *
+ * @return Number of bytes copied (recieved) into the buffer. On error, negative error number.
+ */
+int auth_periph_rx(struct authenticate_conn *conn, uint8_t *buf, size_t len);
+
+
 
 /**
  * @brief IO buffer routines used to manage the circular receive buffer for

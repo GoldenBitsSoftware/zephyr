@@ -31,63 +31,6 @@ LOG_MODULE_DECLARE(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 
 #ifdef CONFIG_LOOPBACK_TEST
 
-#if defined(CONFIG_BT_GATT_CLIENT)
-static int auth_central_tx(struct authenticate_conn *conn, uint8_t *data, size_t len)
-{
-    int numbytes_err = 0;  /* num bytes written if > 0, else error */
-
-    if(conn->use_gatt_attributes) {
-        numbytes_err = auth_svc_central_tx(conn, data, len);
-    } else {
-        /* use L2CAP layer */
-        numbytes_err = auth_svc_tx_l2cap(conn, data, len);
-    }
-
-    return numbytes_err;
-}
-
-static int auth_central_rx(struct authenticate_conn *conn, uint8_t *buf, size_t rxbytes)
-{
-    int err;
-    if(conn->use_gatt_attributes) {
-        err = auth_svc_central_recv_timeout(conn, buf, rxbytes, 3000);
-    } else {
-        err =  auth_svc_recv_l2cap(conn, buf, rxbytes);
-        // int auth_svc_recv_over_l2cap_timeout(void *ctx, unsigned char *buf,
-        //                                     size_t len, uint32_t timeout);
-    }
-
-    return err;
-}
-#else
-static int auth_periph_tx(struct authenticate_conn *conn, uint8_t *data, size_t len)
-{
-    int err;
-    if(conn->use_gatt_attributes) {
-        err = auth_svc_peripheral_tx(conn, data, len);
-    } else {
-        err = auth_svc_tx_l2cap(conn, data, len);
-    }
-
-    return err;
-}
-
-static int auth_periph_rx(struct authenticate_conn *conn, uint8_t *buf, size_t len)
-{
-    int err;
-
-    if(conn->use_gatt_attributes) {
-        err = auth_svc_peripheral_recv_timeout(conn, buf, len, 3000);
-    } else {
-         err =  auth_svc_recv_l2cap(conn, buf, len);
-        // int auth_svc_recv_over_l2cap_timeout(void *ctx, unsigned char *buf,
-        //                                     size_t len, uint32_t timeout);
-
-    }
-
-    return err;
-}
-#endif  /* CONFIG_BT_GATT_CLIENT */
 
 
 #define  TEST_DATA_LEN          (200u)
