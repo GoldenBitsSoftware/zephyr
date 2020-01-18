@@ -518,7 +518,7 @@ void main(void)
      */
     tls_credential_add();
 
-    uint32_t flags = AUTH_CONN_CENTRAL|AUTH_CONN_DTLS_AUTH_METHOD;
+    uint32_t flags = AUTH_CONN_CENTRAL|AUTH_CONN_CHALLENGE_AUTH_METHOD;
     flags |= AUTH_CONN_USE_L2CAP;
     int err = auth_svc_init(&central_auth_conn, auth_status, NULL, flags);
 
