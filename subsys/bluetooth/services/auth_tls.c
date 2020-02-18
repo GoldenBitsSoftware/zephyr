@@ -12,6 +12,7 @@
 #include <zephyr.h>
 #include <init.h>
 
+
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/hci.h>
 #include <bluetooth/conn.h>
@@ -45,6 +46,8 @@ LOG_MODULE_DECLARE(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 
 #include "auth_internal.h"
 
+
+
 #define MAX_MBEDTLS_CONTEXT     5
 
 /**
@@ -54,11 +57,13 @@ LOG_MODULE_DECLARE(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 struct mbed_tls_context {
     bool in_use;
 
-    mbedtls_entropy_context entropy;
+    //mbedtls_entropy_context entropy;  TODO: Investigate if needed
     mbedtls_ctr_drbg_context ctr_drbg;
     mbedtls_ssl_context ssl;
     mbedtls_ssl_config conf;
     mbedtls_x509_crt cacert;
+    mbedtls_x509_crt device_cert;
+    mbedtls_pk_context device_private_key;
     mbedtls_timing_delay_context timer;
 };
 
@@ -70,7 +75,31 @@ void auth_svc_internal_status_callback(struct authenticate_conn *auth_con , auth
 
 /* ===================== local functions =========================== */
 
+#if defined(CONFIG_BT_GATT_CLIENT)
 
+static int auth_central_tx_tls(void *ctx, const unsigned char *buf, size_t len)
+{
+    return auth_central_tx((struct authenticate_conn*)ctx, buf, len);
+}
+
+static int auth_central_rx_tls(void *ctx, unsigned char *buf, size_t len)
+{
+    return auth_central_rx((struct authenticate_conn*)ctx, buf, len);
+}
+
+#else
+
+static int auth_periph_tx_tls(void *ctx, const unsigned char *buf, size_t len)
+{
+    return auth_periph_tx((struct authenticate_conn*)ctx, buf, len);
+}
+
+static int auth_periph_rx_tls(void *ctx, unsigned char *buf, size_t len)
+{
+    return auth_periph_rx((struct authenticate_conn*)ctx, buf, len);
+}
+
+#endif /* CONFIG_BT_GATT_CLIENT */
 
 // return NULL if unable to get context
 static struct mbed_tls_context *auth_get_mbedcontext(void)
@@ -90,7 +119,95 @@ static struct mbed_tls_context *auth_get_mbedcontext(void)
 static void auth_free_mbedcontext(struct mbed_tls_context *mbed_ctx)
 {
     mbed_ctx->in_use = false;
+
+    /* Free any MBed tls resources */
+    mbedtls_x509_crt_free(&mbed_ctx->cacert);
+    mbedtls_x509_crt_free(&mbed_ctx->device_cert);
+    mbedtls_pk_free(&mbed_ctx->device_private_key);
+    mbedtls_ssl_free(&mbed_ctx->ssl);
+    mbedtls_ssl_config_free(&mbed_ctx->conf);
+    mbedtls_ctr_drbg_free(&mbed_ctx->ctr_drbg);
+    //mbedtls_entropy_free(&mbed_ctx->entropy);  TODO: Investigate if needed
 }
+
+
+static void auth_init_context(struct mbed_tls_context *mbed_ctx)
+{
+    mbedtls_ssl_init(&mbed_ctx->ssl);
+    mbedtls_ssl_config_init(&mbed_ctx->conf);
+    mbedtls_x509_crt_init(&mbed_ctx->cacert);
+    mbedtls_x509_crt_init(&mbed_ctx->device_cert);
+    mbedtls_pk_init(&mbed_ctx->device_private_key);
+
+    //mbedtls_entropy_init(&mbed_ctx->entropy);  TODO: Investigate if needed.
+    mbedtls_ctr_drbg_init(&mbed_ctx->ctr_drbg);
+}
+
+
+/**
+ * Timer functions
+ */
+static unsigned long auth_tls_timing_get_timer( struct mbedtls_timing_hr_time *val, int reset )
+{
+    unsigned long delta;
+    unsigned long *mssec = (unsigned long*) val;
+    unsigned long cur_msg = k_uptime_get_32();
+
+    if( reset )
+    {
+        *mssec = cur_msg;
+        return ( 0 );
+    }
+
+    delta = cur_msg - *mssec;
+
+    return ( delta );
+}
+
+/*
+ * Set delays to watch
+ */
+static void auth_tls_timing_set_delay( void *data, uint32_t int_ms, uint32_t fin_ms )
+{
+    mbedtls_timing_delay_context *ctx = (mbedtls_timing_delay_context *) data;
+
+    ctx->int_ms = int_ms;
+    ctx->fin_ms = fin_ms;
+
+    if( fin_ms != 0 )
+        (void) auth_tls_timing_get_timer( &ctx->timer, 1 );
+}
+
+/*
+ * Get number of delays expired
+ */
+static int auth_tls_timing_get_delay( void *data )
+{
+    mbedtls_timing_delay_context *ctx = (mbedtls_timing_delay_context *) data;
+    unsigned long elapsed_ms;
+
+    if( ctx->fin_ms == 0 )
+        return( -1 );
+
+    elapsed_ms = auth_tls_timing_get_timer( &ctx->timer, 0 );
+
+    if( elapsed_ms >= ctx->fin_ms )
+        return( 2 );
+
+    if( elapsed_ms >= ctx->int_ms )
+        return( 1 );
+
+    return( 0 );
+}
+
+static int auth_tls_drbg_random(void *ctx, unsigned char *rand_buf, size_t number)
+{
+    // TODO: Use sys_csrand_get() instead?
+    sys_rand_get(rand_buf, number);
+
+    return 0;
+}
+
 
 /**
  * Mbed debug levels:   0 No debug
@@ -141,9 +258,8 @@ static void auth_mbed_debug(void *ctx, int level, const char *file,
 
 /* ================= external/internal funcs ==================== */
 /**
-  * do all of the mbed init stuff here
- * @param auth_conn
- * @return
+ * @see auth_internal.h
+ *
  */
 int auth_init_dtls_method(struct authenticate_conn *auth_conn)
 {
@@ -160,6 +276,14 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
         LOG_ERR("Unable to allocate Mbed TLS context.");
         return AUTH_ERROR_NO_RESOURCE;
     }
+
+    if(auth_conn->cert_cont == NULL) {
+        LOG_ERR("Device certs not set.");
+        return AUTH_ERROR_INVALID_PARAM;
+    }
+
+    /* Init mbed context */
+    auth_init_context(mbed_ctx);
 
     /* Save MBED tls context as internal object. The intent of using a void
      * 'internal_obj' is to provide a var in the struct authentication_conn to
@@ -183,64 +307,107 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
     /**
      * Setup the correct functions to Tx/Rx over BLE.
      */
-    if(auth_conn->is_central)
+#if defined(CONFIG_BT_GATT_CLIENT)
+
+    if(!auth_conn->is_central)
     {
-        if(auth_conn->use_gatt_attributes)
-        {
-            send_func         =  auth_svc_central_tx;
-            recv_func         = auth_svc_central_recv;
-            recv_timeout_func = auth_svc_central_recv_timeout;
-        }
-        else
-        {
-            /* Use L2CAP layer */
-            send_func         = auth_svc_tx_l2cap;
-            recv_func         = auth_svc_recv_l2cap;
-            recv_timeout_func = auth_svc_recv_over_l2cap_timeout;
-        }
-    }
-    else
-    {
-        // peripheral
-        if(auth_conn->use_gatt_attributes)
-        {
-            send_func         = auth_svc_peripheral_tx;
-            recv_func         = auth_svc_peripheral_recv;
-            recv_timeout_func = auth_svc_peripheral_recv_timeout;
-        }
-        else
-        {
-            /* Use L2CAP layer */
-            send_func         = auth_svc_tx_l2cap;
-            recv_func         = auth_svc_recv_l2cap;
-            recv_timeout_func = auth_svc_recv_over_l2cap_timeout;
-        }
+        /* Invalid config */
+        return AUTH_ERROR_INVALID_PARAM;
     }
 
+    send_func         = auth_central_tx_tls;
+    recv_func         = auth_central_rx_tls;
+    recv_timeout_func = NULL;
+
+#else
+
+    /* peripheral */
+    if(auth_conn->is_central)
+    {
+        // Invalid config
+        return AUTH_ERROR_INVALID_PARAM;
+    }
+
+    send_func         = auth_periph_tx_tls;
+    recv_func         = auth_periph_rx_tls;
+    recv_timeout_func = NULL;
+
+#endif  /* CONFIG_BT_GATT_CLIENT */
+
     // set the lower layer transport functions
-    mbedtls_ssl_set_bio( &mbed_ctx->ssl, auth_conn, send_func, recv_func, NULL /*recv_timeout_func*/ );
+    mbedtls_ssl_set_bio( &mbed_ctx->ssl, auth_conn, send_func, recv_func, recv_timeout_func);
 
     /* OPTIONAL is usually a bad choice for security, but makes interop easier
      * in this simplified example, in which the ca chain is hardcoded.
      * Production code should set a proper ca chain and use REQUIRED. */
-    //mbedtls_ssl_conf_authmode( &conf, MBEDTLS_SSL_VERIFY_OPTIONAL );
     mbedtls_ssl_conf_authmode( &mbed_ctx->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
-    mbedtls_ssl_conf_ca_chain( &mbed_ctx->conf, &mbed_ctx->cacert, NULL );
-    mbedtls_ssl_conf_rng( &mbed_ctx->conf, mbedtls_ctr_drbg_random, &mbed_ctx->ctr_drbg );
-    mbedtls_ssl_conf_dbg( &mbed_ctx->conf, auth_mbed_debug,  auth_conn);
 
-    if( ( ret = mbedtls_ssl_setup( &mbed_ctx->ssl, &mbed_ctx->conf ) ) != 0 )
-    {
+    ret = mbedtls_pk_parse_key(&mbed_ctx->device_private_key, auth_conn->cert_cont->device_cert->private_key,
+                               auth_conn->cert_cont->device_cert->key_len, NULL, 0);
+
+    if(ret) {
+        auth_free_mbedcontext(mbed_ctx);
+        LOG_ERR("Failed to parse device private key, error: 0x%x", ret);
+        return AUTH_ERROR_DTLS_INIT_FAILED;
+    }
+
+    /**
+     * @brief Setup device certs, the CA chain followed by the end device cert.
+     */
+    if(auth_conn->cert_cont->num_ca_certs == 0u) {
+        /* log a warning, this maybe intentional */
+        LOG_WRN("No CA certs.");
+    }
+
+    for(uint8_t cnt = 0; cnt < auth_conn->cert_cont->num_ca_certs; cnt++) {
+        /* Check if this is a device cert */
+        if(auth_conn->cert_cont->ca_certs[cnt].cert_type == AUTH_CERT_END_DEVICE) {
+            LOG_WRN("End-Device cert being used as CA cert.");
+        }
+
+        /* Parse and set the CA certs */
+        ret = mbedtls_x509_crt_parse(&mbed_ctx->cacert, auth_conn->cert_cont->ca_certs[cnt].cert_data,
+                                     auth_conn->cert_cont->ca_certs[cnt].cert_len);
+
+        if(ret) {
+            auth_free_mbedcontext(mbed_ctx);
+            LOG_ERR("Failed to parse CA cert, error: 0x%x", ret);
+            return AUTH_ERROR_DTLS_INIT_FAILED;
+        }
+    }
+
+    /* set CA certs into context */
+    mbedtls_ssl_conf_ca_chain(&mbed_ctx->conf, &mbed_ctx->cacert, NULL);
+
+    /* Parse and set the device cert */
+    ret = mbedtls_ssl_conf_own_cert(&mbed_ctx->conf, &mbed_ctx->device_cert, &mbed_ctx->device_private_key);
+
+    if(ret) {
+        auth_free_mbedcontext(mbed_ctx);
+        LOG_ERR("Failed to set device cert and key, error: 0x%x", ret);
+        return AUTH_ERROR_DTLS_INIT_FAILED;
+    }
+
+
+    /* setup call to Zephyr random API */
+    mbedtls_ssl_conf_rng( &mbed_ctx->conf, auth_tls_drbg_random, &mbed_ctx->ctr_drbg );
+    mbedtls_ssl_conf_dbg( &mbed_ctx->conf, auth_mbed_debug, auth_conn);
+
+#if defined(MBEDTLS_DEBUG_C)
+    mbedtls_debug_set_threshold(3); // Should be KConfig option
+#endif
+
+    ret = mbedtls_ssl_setup(&mbed_ctx->ssl, &mbed_ctx->conf);
+
+    if(ret) {
         auth_free_mbedcontext(mbed_ctx);
         LOG_ERR( "mbedtls_ssl_setup returned %d", ret );
         return AUTH_ERROR_DTLS_INIT_FAILED;
     }
 
-    // TODO: Need to setup timers w/Zepher
-
-    // TODO:  Use Nordic TRNG for entropy
-
-      mbedtls_debug_set_threshold(3); // Should be KConfig option
+    /* Setup timers */
+    mbedtls_ssl_set_timer_cb(&mbed_ctx->ssl, &mbed_ctx->timer, auth_tls_timing_set_delay,
+                             auth_tls_timing_get_delay );
 
 
     return AUTH_SUCCESS;
