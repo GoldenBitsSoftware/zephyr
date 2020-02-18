@@ -16,6 +16,7 @@
 #include <device.h>
 #include <drivers/gpio.h>
 
+#include <net/tls_credentials.h>
 
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/hci.h>
@@ -27,6 +28,13 @@
 #include <logging/log_ctrl.h>
 
 #include <bluetooth/services/auth_svc.h>
+
+#if defined(CONFIG_DTLS_AUTH_METHOD)
+#include "../cert_chain/ble_auth_all_certs/bleauth_ca_chain.h"
+#include "../cert_chain/ble_auth_all_certs/bleauth_central_cert.h"
+#include "../cert_chain/ble_auth_all_certs/bleauth_peripheral_key.h"
+#include "../cert_chain/ble_auth_all_certs/bleauth_central_key.h"
+#endif
 
 
 LOG_MODULE_REGISTER(central_auth, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
@@ -53,10 +61,6 @@ LOG_MODULE_REGISTER(central_auth, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 #endif
 #define PULL_UP DT_ALIAS_SW0_GPIOS_FLAGS
 
-/**
- * Handy macro to spin forever
- */
-#define SPIN_FOREVER        while(1) { };
 
 static struct bt_conn *default_conn;
 static struct bt_uuid_16 uuid = BT_UUID_INIT_16(0);
@@ -106,6 +110,36 @@ static auth_svc_gatt_t auth_svc_gatt_tbl[AUTH_SVC_GATT_COUNT] = {
         { BT_UUID_GATT_CCC,             NULL, 0, 0, BT_GATT_PERM_NONE, BT_GATT_DISCOVER_DESCRIPTOR},     //!< AUTH_SVC_CLIENT_CCC_INDEX CCC for Client char */
         { BT_UUID_AUTH_SVC_SERVER_CHAR, NULL, 0, 0, BT_GATT_PERM_NONE, BT_GATT_DISCOVER_CHARACTERISTIC}   //!< AUTH_SVC_SERVER_CHAR_INDEX
  };
+
+#if defined(CONFIG_DTLS_AUTH_METHOD)
+
+/* The Root and Intermediate Certs, in a single chain, PEM format.*/
+static struct auth_tls_certs ca_cert_chain = {
+    .cert_type = AUTH_CERT_CA_CHAIN,
+    .cert_data = bleauth_root_ca_chain_pem,
+    .cert_len = sizeof(bleauth_root_ca_chain_pem),
+    .private_key = NULL,            /* not used for CA certs */
+    .key_len = 0u
+};
+
+static struct auth_tls_certs device_cert = {
+    .cert_type = AUTH_CERT_END_DEVICE,
+    .cert_data = bleauth_central_cert_pem,
+    .cert_len = sizeof(bleauth_central_cert_pem),
+    .private_key = bleauth_central_key_pem,
+    .key_len = sizeof(bleauth_central_key_pem)
+};
+
+/**
+ * @brief Struct containing all of the certs for this Central device.
+ */
+static struct auth_cert_container certs = {
+        .num_ca_certs = 1,            ///<  1 if passing a chain of CA certs.
+        .ca_certs = &ca_cert_chain,   ///<  Cert chain, contians Root and Intermediate
+        .device_cert = &device_cert   ///<  End device cert.
+};
+#endif
+
 
 /**
  * Params used to change the connection MTU lenght.
@@ -479,20 +513,6 @@ static int init_button(void)
     return 0;
 }
 
-static int tls_credential_add()
-{
-    /*
-     * TODO
-    int err = tls_credential_add(SERVER_CERTIFICATE_TAG,
-                                 TLS_CREDENTIAL_SERVER_CERTIFICATE,
-                                 server_certificate,
-                                 sizeof(server_certificate));
-
-    */
-
-    return -1;
-}
-
 
 static void auth_status(struct authenticate_conn *auth_conn, auth_status_t status, void *context)
 {
@@ -507,25 +527,59 @@ static void process_log_msgs(void)
     }
 }
 
+static void idle_process(void)
+{
+    /* Just spin while the BT modules handle the connection and authentication. */
+    while(true) {
+
+        process_log_msgs();
+
+        /* Let the handshake thread run */
+        k_yield();
+    }
+}
+
+
 void main(void)
 {
+    int err = 0;
+
     log_init();
 
     LOG_INF("Central Auth started.");
 
-    /**
-     * Add certificates to tls_credentls store
-     */
-    tls_credential_add();
 
-    uint32_t flags = AUTH_CONN_CENTRAL|AUTH_CONN_CHALLENGE_AUTH_METHOD;
+    uint32_t flags = AUTH_CONN_CENTRAL;
+
+#if defined(CONFIG_DTLS_AUTH_METHOD) && defined(CONFIG_CHALLENGE_RESP_AUTH_METHOD)
+#error Invalid authenticaiton config, either DTLS or Challenge-Response, not both.
+#endif
+
+#if defined(CONFIG_DTLS_AUTH_METHOD)
+     flags |= AUTH_CONN_DTLS_AUTH_METHOD;
+#endif
+
+#if defined(CONFIG_CHALLENGE_RESP_AUTH_METHOD)
+     flags |= AUTH_CONN_CHALLENGE_AUTH_METHOD;
+#endif
+
+#if defined(CONFIG_USE_L2CAP)
     flags |= AUTH_CONN_USE_L2CAP;
-    int err = auth_svc_init(&central_auth_conn, auth_status, NULL, flags);
+#endif
 
+
+#if defined(CONFIG_DTLS_AUTH_METHOD)
+    /**
+    * Add certificates to authentication instance.
+    */
+    auth_svc_set_tls_certs(&central_auth_conn, &certs);
+#endif
+
+    err = auth_svc_init(&central_auth_conn, auth_status, NULL, flags);
 
     if(err) {
         LOG_ERR("Failed to init authentication service, err: %d.", err);
-        return;
+        idle_process();  /* does not return */
     }
 
     /**
@@ -536,7 +590,7 @@ void main(void)
     err = bt_enable(NULL);
     if (err) {
         LOG_ERR("Failed to enable the bluetooth module, err: %d", err);
-        SPIN_FOREVER;
+        idle_process();  /* does not return */
     }
 
     /* Register connect/disconnect callbacks */
@@ -545,14 +599,9 @@ void main(void)
     /* Init button 1 to start scanning process */
     init_button();
 
+    /* does not return */
+    idle_process();
 
-    /* just spin while the BT modules handle the connection and authentiation */
-    while(true) {
-
-        process_log_msgs();
-
-        /* Let the handshake thread run */
-        k_yield();
-    }
+    /* should not reach here */
 
 }
