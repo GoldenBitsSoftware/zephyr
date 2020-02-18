@@ -1,7 +1,0 @@
-
-#
-# Command to create a CSR for an end Device
-#
-openssl req -new -sha256 -key device_1.key.pem -out bleauth_device1.csr
-
-

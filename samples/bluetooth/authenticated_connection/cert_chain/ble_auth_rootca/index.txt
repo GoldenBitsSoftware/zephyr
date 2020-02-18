@@ -1,1 +1,0 @@
-V	210127214821Z		1000	unknown	/C=US/ST=California/O=Zephyr BLE Auth Test/OU=BLE Auth Test/CN=Zephyr BLE Auth Intermediate/emailAddress=dummy@dummy.com
