@@ -29,9 +29,19 @@ int auth_svc_get_peripheral_attributes(struct authenticate_conn *auth_conn);
  *
  * @param auth_conn Pointer to Authentication connection struct.
  *
- * @return  0 on success else one of AUTH_ERROR_* values.
+ * @return  0 on success else negative error number.
  */
 int auth_svc_start_thread(struct authenticate_conn *auth_conn);
+
+
+/**
+ * Initializes DTLS authentication method.
+ *
+ * @param auth_conn Pointer to Authentication connection struct.
+ *
+ * @return  0 on success else one of AUTH_ERROR_* values.
+ */
+int auth_init_dtls_method(struct authenticate_conn *auth_conn);
 
 
 /**
@@ -40,84 +50,80 @@ int auth_svc_start_thread(struct authenticate_conn *auth_conn);
 
 
 /**
- *  Used by the Central to send data bytes to the Peripheral.  Also used as MbedTLS
- *  BIO function.  If necessary, will break up data into several sends depending
+ *  Used by the Central to send data bytes to the Peripheral.
+ *  If necessary, will break up data into several sends depending
  *  on the MTU size.
  *
- * @param ctx   Context, pointer to Authentication connection struct.
- * @param buf   Buffer to send.
- * @param len   Buffer size.
+ * @param auth_conn   Pointer to Authentication connection struct.
+ * @param buf         Buffer to send.
+ * @param len         Buffer size.
  *
  * @return  Number of bytes sent or negative error value.
  */
-int auth_svc_central_tx(void *ctx, const unsigned char *buf, size_t len);
+int auth_svc_central_tx(struct authenticate_conn *auth_conn, const unsigned char *buf, size_t len);
 
 /**
  * Used by the Central to read data from the receive buffer.  Will not
  * block, if no bytes are available from the Peripheral returns 0.
- * Also used as MbedTLS BIO function.
  *
- * @param ctx  Context, pointer to Authentication connection struct.
- * @param buf  Buffer to copy byes into.
- * @param len  Buffer length.
+ * @param auth_conn  Pointer to Authentication connection struct.
+ * @param buf        Buffer to copy byes into.
+ * @param len        Buffer length.
  *
  * @return  Number of bytes returned, 0 if no bytes returned, or negative if
  *          an error occurred.
  */
-int auth_svc_central_recv(void *ctx, unsigned char *buf, size_t len);
+int auth_svc_central_recv(struct authenticate_conn *auth_conn, unsigned char *buf, size_t len);
 
 /**
  * Used by the Central to receive data from the Peripheral.  Will block until data is
- * received or a timeout has occurred.  Also used as MbedTLS BIO function.
+ * received or a timeout has occurred.
  *
- * @param ctx      Context, pointer to Authentication connection struct.
- * @param buf      Buffer to copy byes into.
- * @param len      Buffer length.
- * @param timeout  Wait time in msecs for data, K_FOREVER or K_NO_WAIT.
+ * @param auth_conn  Pointer to Authentication connection struct.
+ * @param buf        Buffer to copy byes into.
+ * @param len        Buffer length.
+ * @param timeout    Wait time in msecs for data, K_FOREVER or K_NO_WAIT.
  *
  * @return  Number of bytes returned, 0 if no bytes returned, or negative if
  *          an error occurred.
  */
-int auth_svc_central_recv_timeout(void *ctx, unsigned char *buf, size_t len, uint32_t timeout);
+int auth_svc_central_recv_timeout(struct authenticate_conn *auth_conn, unsigned char *buf, size_t len, uint32_t timeout);
 
 /**
  * Used by the Peripheral to send data to the Central. Will break up buffer to max MTU
  * sizes if necessary and send multiple PDUs.  Uses Write Indications to get acknowledgement
  * from the Central before sending additional packet.
- * Also used as MbedTLS BIO function.
  *
- * @param ctx   Context, pointer to Authentication connection struct.
- * @param buf   Data to send
- * @param len   Data length.
+ * @param auth_conn Pointer to Authentication connection struct.
+ * @param buf       Data to send
+ * @param len       Data length.
  *
  * @return  Number of bytes send, or negative if an error occurred.
  */
-int auth_svc_peripheral_tx(void *ctx, const unsigned char *buf, size_t len);
+int auth_svc_peripheral_tx(struct authenticate_conn *auth_conn, const unsigned char *buf, size_t len);
 
 /**
  * Used by the Peripheral to read data from the receive buffer. Non-blocking.
- * Also used as MbedTLS BIO function.
  *
- * @param ctx Context, pointer to Authentication connection struct.
- * @param buf  Buffer to copy bytes into.
- * @param len  Number of bytes requested.
+ * @param auth_conn Context, pointer to Authentication connection struct.
+ * @param buf       Buffer to copy bytes into.
+ * @param len       Number of bytes requested.
  *
  * @return Number of bytes returned, 0 if no bytes, of negative if an error occurred.
  */
-int auth_svc_peripheral_recv(void *ctx,unsigned char *buf, size_t len);
+int auth_svc_peripheral_recv(struct authenticate_conn *auth_conn, unsigned char *buf, size_t len);
 
 /**
  * Used by the Peripheral to read data from the receive buffer.  Blocking call.
- * Also used as MbedTLS BIO function.
  *
- * @param ctx      Context, pointer to Authentication connection struct.
- * @param buf      Buffer to copy bytes into.
- * @param len      Number of bytes requested.
- * @param timeout  Wait time in msecs for data, K_FOREVER or K_NO_WAIT.
+ * @param auth_conn  Context, pointer to Authentication connection struct.
+ * @param buf        Buffer to copy bytes into.
+ * @param len        Number of bytes requested.
+ * @param timeout    Wait time in msecs for data, K_FOREVER or K_NO_WAIT.
  *
  * @return  Number of bytes returned, or -EAGAIN if timed out.
  */
-int auth_svc_peripheral_recv_timeout(void *ctx, unsigned char *buf, size_t len, uint32_t timeout);
+int auth_svc_peripheral_recv_timeout(struct authenticate_conn *auth_conn, unsigned char *buf, size_t len, uint32_t timeout);
 
 
 /**
@@ -205,7 +211,7 @@ int auth_svc_recv_over_l2cap_timeout(void *ctx, unsigned char *buf,
  *
  * @return Number of bytes sent, negative number on error.
  */
-int auth_central_tx(struct authenticate_conn *conn, uint8_t *data, size_t len);
+int auth_central_tx(struct authenticate_conn *conn, const unsigned char *data, size_t len);
 
 /**
  * Used by the Central to receive data to Peripheral.  Uses either GATT or L2CAP
@@ -229,7 +235,7 @@ int auth_central_rx(struct authenticate_conn *conn, uint8_t *buf, size_t rxbytes
  *
  * @return Number of bytes sent, negative number on error.
  */
-int auth_periph_tx(struct authenticate_conn *conn, uint8_t *data, size_t len);
+int auth_periph_tx(struct authenticate_conn *conn, const unsigned char *data, size_t len);
 
 /**
  * Used by Peripheral to receive data. Uses either GATT or L2CAP
