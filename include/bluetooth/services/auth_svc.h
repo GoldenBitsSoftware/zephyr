@@ -23,8 +23,9 @@ extern "C" {
 #endif
 
 /* TODO: Add to Kconfig for BLE authentication service */
-//#define CONFIG_DTLS_AUTH_METHOD
-#define CONFIG_CHALLENGE_RESP_AUTH_METHOD
+#define CONFIG_DTLS_AUTH_METHOD
+//#define CONFIG_CHALLENGE_RESP_AUTH_METHOD
+//#define CONFIG_USE_L2CAP
 //#define CONFIG_LOOPBACK_TEST    1
 
 /**
@@ -94,6 +95,53 @@ extern "C" {
 
     uint8_t io_buffer[AUTH_SVC_IOBUF_LEN];
  };
+
+
+ /**
+  * Enums of cert types.
+  */
+typedef enum
+{
+    AUTH_CERT_ROOT,         ///< The root certificate
+    AUTH_CERT_CA_CHAIN,     ///< The root CA chain, including the root certificate.
+    AUTH_CERT_INTERMEDIATE, ///< Intermediate CA.
+    AUTH_CERT_END_DEVICE    ///< End device cert, either server (Peripheral) or client (Central)
+} auth_cert_type_t;
+
+/**
+ * @brief  Used to set X.509 certs for TLS/DTLS authentication.
+ *
+ * @note  Storing pointers to the certs in this struct vs. using tls_credentials.c.
+ *        No need to include unnecessary network code.  Also, the tls_credential_get() function
+ *        copies the cert into a buffer which is not needed.
+ */
+struct auth_tls_certs
+{
+    auth_cert_type_t  cert_type;
+    const char *cert_data;
+    uint32_t cert_len;
+
+    /**
+     * @brief  Optional key.  Set with the ATUH_CERT_END_DEVICE cert. For CA certs, should be NULL.
+     */
+    const char *private_key;    ///< Pointer to key in PEM format.
+    uint32_t key_len;
+};
+
+/* Container for all of the certs used */
+struct auth_cert_container
+{
+    /** @brief Count and pointer to array of CA certs.  The
+     *         order of the certs should match the cert chain, meaning the
+     *         root CA should be first followed by any intermediate CA
+     *         certs.
+     */
+    uint8_t num_ca_certs;   ///< number certs of 1 if passing a cert chain
+    struct auth_tls_certs *ca_certs;
+
+    /* either the server or client cert */
+    struct auth_tls_certs *device_cert;
+};
 
  /* Forward declaration */
 struct authenticate_conn;
@@ -177,7 +225,11 @@ struct authenticate_conn
     /* Pointer to internal details, do not touch!!! */
     void *internal_obj;
 
-    /* TLS context? */
+#if defined(CONFIG_DTLS_AUTH_METHOD)
+    /* @brief Struct used to keep/point to all of the certs needed
+     * by the BLE device. */
+    struct auth_cert_container *cert_cont;
+#endif
 };
 
 
@@ -194,16 +246,28 @@ struct authenticate_conn
  * @return 0 on success else one of AUTH_ERROR_* values.
  */
 int auth_svc_init(struct authenticate_conn *auth_conn,
-                  auth_status_cb_t status_func, void *context, uint32_t auth_flags );
+                  auth_status_cb_t status_func, void *context, uint32_t auth_flags);
 
 /**
  * Frees up any previously allocated resources.
  *
- * @param auth_conn  Authentication connection struct.
+ * @param auth_conn  Pointer to Authentication connection struct.
  *
  * @return  0 on success else one of AUTH_ERROR_* values.
  */
 int auth_svc_deinit(struct authenticate_conn *auth_conn);
+
+#if defined(CONFIG_DTLS_AUTH_METHOD)
+/**
+ * For TLS/DLTS authentication sets the necessary certificates.  All certs should be
+ * in PEM format.  The point should be valid during runtime.
+ *
+ * @param auth_conn   Pointer to Authentication connection struct.
+ * @param certs       Pointer to certificates.  Pointer should be valid at all times.
+ *
+ */
+void auth_svc_set_tls_certs(struct authenticate_conn *auth_conn, struct auth_cert_container *certs);
+#endif
 
 /**
  * Starts the authentication process

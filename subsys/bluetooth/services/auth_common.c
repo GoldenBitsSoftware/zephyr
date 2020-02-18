@@ -123,8 +123,22 @@ int auth_svc_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_f
         return AUTH_ERROR_INVALID_PARAM;
     }
 
+#ifdef CONFIG_DTLS_AUTH_METHOD
+    /* save off pointer to cert container if set */
+    struct auth_cert_container *certs = auth_conn->cert_cont;
+#endif
+
     /* init the struct to zero */
     memset(auth_conn, 0, sizeof(struct authenticate_conn));
+
+#ifdef CONFIG_DTLS_AUTH_METHOD
+    /* Restore if not NULL*/
+    if(certs) {
+        auth_conn->cert_cont = certs;
+    }
+#endif
+
+
 
     /* init mutexes */
     k_sem_init(&auth_conn->auth_indicate_sem, 0, 1);
@@ -286,6 +300,16 @@ void auth_svc_set_status(struct authenticate_conn *auth_conn, auth_status_t stat
     }
 }
 
+#if defined(CONFIG_DTLS_AUTH_METHOD)
+/**
+ * @see auth_svc.h
+ */
+void auth_svc_set_tls_certs(struct authenticate_conn *auth_conn, struct auth_cert_container *certs)
+{
+    auth_conn->cert_cont = certs;
+}
+#endif
+
 /**
  * @brief  Routines to Tx/Rx.  Will use GATT or L2CAP layer depending on configuation.
  */
@@ -295,7 +319,7 @@ void auth_svc_set_status(struct authenticate_conn *auth_conn, auth_status_t stat
 /**
  * @see auth_internal.h
  */
-int auth_central_tx(struct authenticate_conn *conn, uint8_t *data, size_t len)
+int auth_central_tx(struct authenticate_conn *conn, const unsigned char *data, size_t len)
 {
     int numbytes_err = 0;  /* num bytes written if > 0, else error */
 
@@ -328,7 +352,7 @@ int auth_central_rx(struct authenticate_conn *conn, uint8_t *buf, size_t rxbytes
 /**
  * @see auth_internal.h
  */
-int auth_periph_tx(struct authenticate_conn *conn, uint8_t *data, size_t len)
+int auth_periph_tx(struct authenticate_conn *conn, const unsigned char *data, size_t len)
 {
     int err;
     if(conn->use_gatt_attributes) {
