@@ -66,10 +66,8 @@ u8_t auth_svc_gatt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe
 /**
  * @see auth_internal.h
  */
-int auth_svc_central_recv(void *ctx, unsigned char *buf, size_t len)
+int auth_svc_central_recv(struct authenticate_conn *auth_conn, unsigned char *buf, size_t len)
 {
-    struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
-
     /* copy bytes, returns the number of bytes actually copied */
     int err = auth_svc_buffer_get(&auth_conn->rx_buf, buf,  len);
 
@@ -79,10 +77,9 @@ int auth_svc_central_recv(void *ctx, unsigned char *buf, size_t len)
 /**
  * @see auth_internal.h
  */
-int auth_svc_central_recv_timeout(void *ctx, unsigned char *buf, size_t len, uint32_t timeout_msec)
+int auth_svc_central_recv_timeout(struct authenticate_conn *auth_conn, unsigned char *buf, size_t len, uint32_t timeout_msec)
 {
     int err = 0;
-    struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
 
     err = auth_svc_buffer_get_wait(&auth_conn->rx_buf, buf, len, timeout_msec);
 
@@ -110,9 +107,8 @@ static void gatt_central_write_cb(struct bt_conn *conn, u8_t err, struct bt_gatt
 /**
  * @see auth_internal.h
  */
-int auth_svc_central_tx(void *ctx, const unsigned char *buf, size_t len)
+int auth_svc_central_tx(struct authenticate_conn *auth_conn, const unsigned char *buf, size_t len)
 {
-    struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
     int err = 0;
     u16_t write_count;
     int total_write_cnt = 0;
@@ -186,9 +182,8 @@ static void auth_svc_peripheral_indicate(struct bt_conn *conn,
 /**
  * @see auth_internal.h
  */
-int auth_svc_peripheral_tx(void *ctx, const unsigned char *buf, size_t len)
+int auth_svc_peripheral_tx(struct authenticate_conn *auth_conn, const unsigned char *buf, size_t len)
 {
-    struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
     int ret = 0;
     int total_bytes_sent = 0;
     bool done = false;
@@ -255,10 +250,8 @@ int auth_svc_peripheral_tx(void *ctx, const unsigned char *buf, size_t len)
 /**
  * @see auth_internal.h
  */
-int auth_svc_peripheral_recv_timeout(void *ctx, unsigned char *buf, size_t len, uint32_t timeout)
+int auth_svc_peripheral_recv_timeout(struct authenticate_conn *auth_conn, unsigned char *buf, size_t len, uint32_t timeout)
 {
-    struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
-
     int err = auth_svc_buffer_get_wait(&auth_conn->rx_buf, buf,  len, timeout);
 
     return err;
@@ -267,9 +260,9 @@ int auth_svc_peripheral_recv_timeout(void *ctx, unsigned char *buf, size_t len, 
 /**
  * @see auth_internal.h
  */
-int auth_svc_peripheral_recv(void *ctx,unsigned char *buf, size_t len)
+int auth_svc_peripheral_recv(struct authenticate_conn *auth_conn, unsigned char *buf, size_t len)
 {
-    int err = auth_svc_peripheral_recv_timeout(ctx, buf, len, K_NO_WAIT);
+    int err = auth_svc_peripheral_recv_timeout(auth_conn, buf, len, K_NO_WAIT);
 
     return err;
 }
