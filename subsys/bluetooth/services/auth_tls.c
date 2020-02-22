@@ -227,7 +227,13 @@ static void auth_mbed_debug(void *ctx, int level, const char *file,
 {
     const char *p, *basename;
 
-    ARG_UNUSED(ctx);
+    /**
+     * @brief   Need to define const string here vs. const char *fmt = "[%s:%d] %s"
+     *          because the LOG_ERR(), LOG_* macros can't handle pointer.
+     */
+#define LOG_FMT  "[%s:%d] %s"
+
+    (void)ctx;
 
     if (!file || !str) {
         return;
@@ -239,20 +245,36 @@ static void auth_mbed_debug(void *ctx, int level, const char *file,
             basename = p + 1;
         }
     }
-#if 0
+
+
     switch(level)
     {
         case 0:
+        {
+            LOG_ERR(LOG_FMT, log_strdup(basename), line, log_strdup(str));
             break;
+        }
 
         case 1:
-            LOG_ERROR()
+        {
+            LOG_WRN(LOG_FMT, log_strdup(basename), line, log_strdup(str));
             break;
-    }
+         }
 
-    NET_DBG("%s:%04d: |%d| %s", basename, line, level,
-            log_strdup(str));
-#endif
+        case 2:
+         {
+            LOG_INF(LOG_FMT,  log_strdup(basename), line, log_strdup(str));
+            break;
+          }
+
+        case 3:
+        default:
+         {
+            LOG_DBG(LOG_FMT, log_strdup(basename), line, log_strdup(str));
+            break;
+         }
+    }
+    
 }
 
 
@@ -439,6 +461,10 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3)
     do {
         // do handshake step
         ret = mbedtls_ssl_handshake( &mbed_ctx->ssl );
+
+// DAG DEBUG BEG
+    LOG_ERR("** ret is: 0x%x", ret);
+// DAG DEBUG END
 
         // check return and post status
         //auth_internal_status_callback(struct authenticate_conn *auth_con , auth_status_t status)
