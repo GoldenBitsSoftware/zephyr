@@ -111,6 +111,8 @@ int auth_svc_start_thread(struct authenticate_conn *auth_conn)
  */
 int auth_svc_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_func, void *context, uint32_t auth_flags)
 {
+    int err;
+
     /* check input params */
     if(status_func == NULL) {
         LOG_ERR("Error, status function is NULL.");
@@ -157,7 +159,7 @@ int auth_svc_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_f
         auth_conn->use_gatt_attributes = false;
 
         /* init auth L2CAP layer */
-        int err = auth_svc_l2cap_init(auth_conn);
+        err = auth_svc_l2cap_init(auth_conn);
 
         if(err) {
             LOG_ERR("Failed to initialize authentication service over L2CAP, err: %d", err);
@@ -175,7 +177,12 @@ int auth_svc_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_f
     auth_conn->auth_thread_func = auth_dtls_thead;
 
     // init TLS layer
-    auth_init_dtls_method(auth_conn);
+    err = auth_init_dtls_method(auth_conn);
+
+    if(err) {
+        LOG_ERR("Failed to initialize MBed TLS, err: %d", err);
+        return err;
+    }
 #endif
 
 #ifdef CONFIG_CHALLENGE_RESP_AUTH_METHOD
@@ -587,6 +594,25 @@ int auth_svc_buffer_bytecount(struct auth_io_buffer *iobuf)
     k_mutex_unlock(&iobuf->buf_mutex);
 
     return err;
+}
+
+/**
+ * @see auth_internal.h
+ */
+int auth_svc_buffer_bytecount_wait(struct auth_io_buffer *iobuf, uint32_t waitmsec)
+{
+    int bytecount = auth_svc_buffer_bytecount(iobuf);
+
+    if(bytecount == 0) {
+        /* wait until bytes present */
+        int err = k_sem_take(&iobuf->buf_sem, K_MSEC(waitmsec));
+
+        if(err) {
+            return err;  /* timed out -EAGAIN or error */
+        }
+    }
+
+    return auth_svc_buffer_bytecount(iobuf);
 }
 
 /**

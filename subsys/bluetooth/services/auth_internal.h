@@ -306,9 +306,19 @@ int auth_svc_buffer_get_wait(struct auth_io_buffer *iobuf, uint8_t *out_buf, int
  *
  * @param iobuf  Pointer to IO buffer struct.
  *
- * @return  Number of bytes.
+ * @return  Number of bytes or error.
  */
 int auth_svc_buffer_bytecount(struct auth_io_buffer *iobuf);
+
+/**
+ * Get number of bytes in buffer, wait number of msecs if no bytes are available.
+ *
+ * @param iobuf      Pointer to IO buffer struct.
+ * @param waitmsec   Number of milliseconds to wait until bytes arrive in buffer.
+ *
+ * @return  Number of bytes, timeout, or error
+ */
+int auth_svc_buffer_bytecount_wait(struct auth_io_buffer *iobuf, uint32_t waitmsec);
 
 /**
  * Determines if the buffer is full;

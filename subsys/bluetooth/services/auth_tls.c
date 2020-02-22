@@ -452,10 +452,9 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
  * @param arg2
  * @param arg3
  */
-void auth_dtls_thead(void *arg1, void *arg2, void *arg3)
-{
-    struct authenticate_conn *auth_conn = (struct authenticate_conn *)arg1;
-    struct mbed_tls_context *mbed_ctx = (struct mbed_tls_context *)auth_conn->internal_obj;
+void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
+    struct authenticate_conn *auth_conn = (struct authenticate_conn *) arg1;
+    struct mbed_tls_context *mbed_ctx = (struct mbed_tls_context *) auth_conn->internal_obj;
 
 
     /**
@@ -465,6 +464,18 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3)
      *
      * For the central (client), a client hello will be sent immediately.
      */
+
+    if (!auth_conn->is_central) {
+
+        int bytecount = auth_svc_buffer_bytecount_wait(&auth_conn->rx_buf, 15000u);
+
+        if(bytecount <= 0) {
+            LOG_ERR("Peripheral did not receive initial Client Hello, error: %d", bytecount);
+            return;
+        }
+
+        LOG_DBG("Peripheral received initial Client Hello from central.");
+    }
 
     int ret = 0;
     // start
@@ -495,5 +506,6 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3)
     //     AUTH_SUCCESSFUL
     //auth_internal_status_callback(struct authenticate_conn *auth_con , auth_status_t status)
 
+    return;
 }
 
