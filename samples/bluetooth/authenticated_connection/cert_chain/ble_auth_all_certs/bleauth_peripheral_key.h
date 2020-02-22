@@ -10,7 +10,7 @@
 
 const unsigned char bleauth_peripheral_key_pem[] = {
         "-- -- -BEGIN EC PARAMETERS-----\n"
-        "BggqhkjOPQMBBw=="
+        "BggqhkjOPQMBBw==\n"
         "-----END EC PARAMETERS-----\n"
         "-----BEGIN EC PRIVATE KEY-----\n"
         "MHcCAQEEICHS/LCDwBIVgmK5qnKHn0yex4URecfT0VZci4JMlpRRoAoGCCqGSM49"

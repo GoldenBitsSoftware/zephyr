@@ -25,7 +25,13 @@
 
 #include <bluetooth/services/auth_svc.h>
 
-
+#if defined(CONFIG_DTLS_AUTH_METHOD)
+#include "../cert_chain/ble_auth_all_certs/bleauth_ca_chain.h"
+#include "../cert_chain/ble_auth_all_certs/bleauth_central_cert.h"
+#include "../cert_chain/ble_auth_all_certs/bleauth_peripheral_cert.h"
+#include "../cert_chain/ble_auth_all_certs/bleauth_peripheral_key.h"
+#include "../cert_chain/ble_auth_all_certs/bleauth_central_key.h"
+#endif
 
 
 struct bt_conn *default_conn;
@@ -33,6 +39,35 @@ struct bt_conn *default_conn;
 static bool is_connected = false;
 
 static struct authenticate_conn auth_conn;
+
+#if defined(CONFIG_DTLS_AUTH_METHOD)
+
+/* The Root and Intermediate Certs, in a single chain, PEM format.*/
+static struct auth_tls_certs ca_cert_chain = {
+    .cert_type = AUTH_CERT_CA_CHAIN,
+    .cert_data = bleauth_root_ca_chain_pem,
+    .cert_len = sizeof(bleauth_root_ca_chain_pem),
+    .private_key = NULL,            /* not used for CA certs */
+    .key_len = 0u
+};
+
+static struct auth_tls_certs periph_device_cert = {
+    .cert_type = AUTH_CERT_END_DEVICE,
+    .cert_data = bleauth_peripheral_cert_pem,
+    .cert_len = sizeof(bleauth_peripheral_cert_pem),
+    .private_key = bleauth_peripheral_key_pem,
+    .key_len = sizeof(bleauth_peripheral_key_pem)
+};
+
+/**
+ * @brief Struct containing all of the certs for this Central device.
+ */
+static struct auth_cert_container peripheral_certs = {
+        .num_ca_certs = 1,            ///<  1 if passing a chain of CA certs.
+        .ca_certs = &ca_cert_chain,   ///<  Cert chain, contians Root and Intermediate
+        .device_cert = &periph_device_cert   ///<  End device cert.
+};
+#endif
 
 /**
  * Set up the advertising data
@@ -152,8 +187,25 @@ void main(void)
 {
     log_init();
 
-    uint32_t auth_flags = AUTH_CONN_PERIPHERAL|AUTH_CONN_DTLS_AUTH_METHOD;
+    uint32_t auth_flags = AUTH_CONN_PERIPHERAL;
+
+
+#if defined(CONFIG_DTLS_AUTH_METHOD)
+    auth_flags |= AUTH_CONN_DTLS_AUTH_METHOD;
+
+    /**
+    * Add certificates to authentication instance.
+    */
+    auth_svc_set_tls_certs(&auth_conn, &peripheral_certs);
+#endif
+
+#if defined(CONFIG_CHALLENGE_RESP_AUTH_METHOD)
+    auth_flags |= AUTH_CONN_CHALLENGE_AUTH_METHOD;
+#endif
+
+#if defined(CONFIG_USE_L2CAP)
     auth_flags |= AUTH_CONN_USE_L2CAP;
+#endif
 
     int err = auth_svc_init(&auth_conn, auth_status, NULL, auth_flags);
 
@@ -161,6 +213,7 @@ void main(void)
         printk("Failed to init authentication service.\n");
         return;
     }
+
 
     err = bt_enable(bt_ready);
     if (err) {
