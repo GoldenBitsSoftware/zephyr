@@ -226,6 +226,7 @@ int auth_svc_start(struct authenticate_conn *auth_conn)
         }
     }
 
+
     /* Start the authentication thread */
     err = auth_svc_start_thread(auth_conn);
 

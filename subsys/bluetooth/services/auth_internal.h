@@ -245,7 +245,7 @@ int auth_periph_tx(struct authenticate_conn *conn, const unsigned char *data, si
  * @param buf   Buffer to copy received bytes into.
  * @param len   Number of bytes requested.
  *
- * @return Number of bytes copied (recieved) into the buffer. On error, negative error number.
+ * @return Number of bytes copied (received) into the buffer. On error, negative error number.
  */
 int auth_periph_rx(struct authenticate_conn *conn, uint8_t *buf, size_t len);
 
