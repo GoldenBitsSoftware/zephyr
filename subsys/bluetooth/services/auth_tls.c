@@ -287,16 +287,17 @@ static int auth_mbedtls_tx(void *ctx, const uint8_t *buf, size_t len)
     int send_count = 0;
     int tx_ret;
     struct auth_tls_frame frame;
-    const uint16_t max_payload = MIN(sizeof(frame.frame_payload), auth_conn->payload_size);
+    const uint16_t max_frame = MIN(sizeof(frame), auth_conn->payload_size);
+    const uint16_t max_payload = max_frame - sizeof(frame.frame_hdr);
 
     /* set frame header */
     frame.frame_hdr = TLS_FRAME_SYNC_BITS|TLS_FRAME_BEGIN;
 
-
     while (len > 0) {
 
-        /* get the send count, leaving room for the frame header */
+        /* get payload bytes */
         payload_bytes = MIN(max_payload, len);
+
         frame_bytes = payload_bytes + sizeof(frame.frame_hdr);
 
         /* is this the last frame? */
