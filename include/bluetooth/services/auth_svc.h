@@ -29,7 +29,7 @@ extern "C" {
 //#define CONFIG_LOOPBACK_TEST    1
 
 /**
- * Should be large enoough to hold one TLS record
+ * Should be large enough to hold one TLS record
  */
 #define CENTRAL_RX_BUFFER_LEN               500
 
@@ -80,7 +80,7 @@ extern "C" {
  } auth_status_t;
 
 
-#define AUTH_SVC_IOBUF_LEN      (300u)
+#define AUTH_SVC_IOBUF_LEN      (2048u)
 
  /**
   * @brief Circular buffer used to save received data.

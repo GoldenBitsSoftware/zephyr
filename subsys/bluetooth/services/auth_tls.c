@@ -356,13 +356,23 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
 
 #endif  /* CONFIG_BT_GATT_CLIENT */
 
-    // set the lower layer transport functions
+    /* set the lower layer transport functions */
     mbedtls_ssl_set_bio( &mbed_ctx->ssl, auth_conn, send_func, recv_func, recv_timeout_func);
+
+    /* Set the max MTU */
+    mbedtls_ssl_set_mtu(&mbed_ctx->ssl, auth_conn->payload_size);
+
+    /* set max record len */
+    mbedtls_ssl_conf_max_frag_len(&mbed_ctx->conf, MBEDTLS_SSL_MAX_FRAG_LEN_512);
+
+    /* Set the DTLS time out */
+    /* TODO: Make these KConfig vars */
+    mbedtls_ssl_conf_handshake_timeout(&mbed_ctx->conf, 2000u, 15000u);
 
     /* OPTIONAL is usually a bad choice for security, but makes interop easier
      * in this simplified example, in which the ca chain is hardcoded.
      * Production code should set a proper ca chain and use REQUIRED. */
-    mbedtls_ssl_conf_authmode( &mbed_ctx->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+    mbedtls_ssl_conf_authmode(&mbed_ctx->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
 
     ret = mbedtls_pk_parse_key(&mbed_ctx->device_private_key, auth_conn->cert_cont->device_cert->private_key,
                                auth_conn->cert_cont->device_cert->key_len, NULL, 0);
