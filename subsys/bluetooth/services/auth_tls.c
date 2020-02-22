@@ -47,8 +47,25 @@ LOG_MODULE_DECLARE(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 #include "auth_internal.h"
 
 
-
 #define MAX_MBEDTLS_CONTEXT     5
+
+#define TLS_FRAME_SIZE          256u
+
+#define TLS_FRAME_SYNC_BITS     0xA590
+#define TLS_FRAME_SYNC_MASK     0xFFF0
+#define TLS_FRAME_BEGIN         0x01
+#define TLS_FRAME_NEXT          0x02
+#define TLS_FRAME_END           0x04
+
+#pragma pack(push, 1)
+struct auth_tls_frame {
+    /* bits 15-4  are for frame sync, bits 3-0 are flags */
+    uint16_t frame_hdr;  /// bytes to insure we're at a frame
+    uint8_t frame_payload[TLS_FRAME_SIZE];  /* TODO: Create #define for this */
+};
+#pragma pack(pop)
+
+
 
 /**
  * Keep list of internal structs which
@@ -75,31 +92,6 @@ void auth_svc_internal_status_callback(struct authenticate_conn *auth_con , auth
 
 /* ===================== local functions =========================== */
 
-#if defined(CONFIG_BT_GATT_CLIENT)
-
-static int auth_central_tx_tls(void *ctx, const unsigned char *buf, size_t len)
-{
-    return auth_central_tx((struct authenticate_conn*)ctx, buf, len);
-}
-
-static int auth_central_rx_tls(void *ctx, unsigned char *buf, size_t len)
-{
-    return auth_central_rx((struct authenticate_conn*)ctx, buf, len);
-}
-
-#else
-
-static int auth_periph_tx_tls(void *ctx, const unsigned char *buf, size_t len)
-{
-    return auth_periph_tx((struct authenticate_conn*)ctx, buf, len);
-}
-
-static int auth_periph_rx_tls(void *ctx, unsigned char *buf, size_t len)
-{
-    return auth_periph_rx((struct authenticate_conn*)ctx, buf, len);
-}
-
-#endif /* CONFIG_BT_GATT_CLIENT */
 
 // return NULL if unable to get context
 static struct mbed_tls_context *auth_get_mbedcontext(void)
@@ -278,6 +270,159 @@ static void auth_mbed_debug(void *ctx, int level, const char *file,
 }
 
 
+/**
+ * Mbed routine to send data, called by Mbed TLS library.
+ *
+ * @param ctx   Context pointer, pointer to struct authenticate_conn
+ * @param buf   Buffer to send.
+ * @param len   Number of bytes to send.
+ *
+ * @return  Number of bytes sent, else Mbed tls error.
+ */
+static int auth_mbedtls_tx(void *ctx, const uint8_t *buf, size_t len)
+{
+    struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
+    int frame_bytes;
+    int payload_bytes;
+    int send_count = 0;
+    int tx_ret;
+    struct auth_tls_frame frame;
+    const uint16_t max_payload = MIN(sizeof(frame.frame_payload), auth_conn->payload_size);
+
+    /* set frame header */
+    frame.frame_hdr = TLS_FRAME_SYNC_BITS|TLS_FRAME_BEGIN;
+
+
+    while (len > 0) {
+
+        /* get the send count, leaving room for the frame header */
+        payload_bytes = MIN(max_payload, len);
+        frame_bytes = payload_bytes + sizeof(frame.frame_hdr);
+
+        /* is this the last frame? */
+        if((len - payload_bytes) == 0) {
+            frame.frame_hdr = TLS_FRAME_SYNC_BITS|TLS_FRAME_END;
+        }
+
+        /* copy body */
+        memcpy(frame.frame_payload, buf, payload_bytes);
+
+#if defined(CONFIG_BT_GATT_CLIENT)
+        /* send frame */
+        tx_ret = auth_central_tx(auth_conn, (const uint8_t*)&frame, frame_bytes);
+#else
+        /* send frame */
+        tx_ret = auth_periph_tx(auth_conn, (const uint8_t*)&frame, frame_bytes);
+#endif
+
+        if(tx_ret < 0) {
+            LOG_ERR("Failed to send TLS frame, error: %d", tx_ret);
+            return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+        }
+
+        /* verify all bytes were sent */
+        if(tx_ret != frame_bytes) {
+            LOG_ERR("Failed to to send all bytes, send: %d, requested: %d", tx_ret, frame_bytes);
+            return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+        }
+
+        /* set next flags */
+        frame.frame_hdr = TLS_FRAME_SYNC_BITS|TLS_FRAME_NEXT;
+
+        len -= payload_bytes;
+        buf += payload_bytes;
+        send_count += payload_bytes;
+    }
+
+    return send_count;
+}
+
+
+/**
+ *  MBed TLS receive function, called by the MBed library to receive data.
+ *
+ * @param ctx      Context pointer, pointer to struct authenticate_conn
+ * @param buffer   Buffer to copy received bytes.
+ * @param len      Byte sizeof buffer.
+ *
+ * @return         Number of bytes copied into the buffer or MBED error.
+ */
+static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
+{
+    struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
+    bool last_frame = false;
+    bool first_frame = true;
+    int rx_bytes;
+    int receive_cnt = 0;
+    struct auth_tls_frame frame;
+
+    while(!last_frame && len != 0U) {
+
+        rx_bytes = MIN(sizeof(frame.frame_payload), len) + sizeof(frame.frame_hdr);
+
+#if defined(CONFIG_BT_GATT_CLIENT)
+        rx_bytes = auth_central_rx(auth_conn, (uint8_t*)&frame, rx_bytes);
+#else
+        rx_bytes = auth_periph_rx(auth_conn, (uint8_t*)&frame, rx_bytes);
+#endif
+
+        /* check for error */
+        if(rx_bytes < 0) {
+            LOG_ERR("Failed to receive TLS frame, error: %d", rx_bytes);
+
+            if(rx_bytes == -EAGAIN) {
+                return MBEDTLS_ERR_SSL_TIMEOUT;
+            }
+
+            return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+        }
+
+        /* check for start flag */
+        if(first_frame) {
+            first_frame = false;
+            if(!(frame.frame_hdr & TLS_FRAME_BEGIN)) {
+                LOG_ERR("Missing beginning frame");
+                return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+            }
+        }
+
+        /* check frame sync bytes */
+        if((frame.frame_hdr & TLS_FRAME_SYNC_MASK) != TLS_FRAME_SYNC_BITS) {
+            LOG_ERR("Invalid frame.");
+            return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+        }
+
+        /* Subtract out frame header */
+        rx_bytes -= sizeof(frame.frame_hdr);
+
+        /* sanity check, if zero or negative */
+        if(rx_bytes <= 0) {
+            LOG_ERR("Empty frame!!");
+            return receive_cnt;
+        }
+
+        /* copy payload bytes */
+        memcpy(buffer, frame.frame_payload, rx_bytes);
+
+        len -= rx_bytes;
+        receive_cnt += rx_bytes;
+        buffer += rx_bytes;
+
+        /* Is this the last frame? */
+        if(frame.frame_hdr & TLS_FRAME_END) {
+            last_frame = true;
+        }
+    }
+
+    if(len == 0U && !last_frame) {
+        LOG_ERR("Receive buffer from Mbed not large enough.");
+        return MBEDTLS_ERR_SSL_BUFFER_TOO_SMALL;
+    }
+
+    return receive_cnt;
+}
+
+
 /* ================= external/internal funcs ==================== */
 /**
  * @see auth_internal.h
@@ -320,47 +465,9 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
                                MBEDTLS_SSL_TRANSPORT_DATAGRAM,
                                MBEDTLS_SSL_PRESET_DEFAULT);
 
-    // MBed bios function pointers
-    mbedtls_ssl_send_t *send_func;
-    mbedtls_ssl_recv_t *recv_func;
-    mbedtls_ssl_recv_timeout_t *recv_timeout_func;
-
-
-    /**
-     * Setup the correct functions to Tx/Rx over BLE.
-     */
-#if defined(CONFIG_BT_GATT_CLIENT)
-
-    if(!auth_conn->is_central)
-    {
-        /* Invalid config */
-        return AUTH_ERROR_INVALID_PARAM;
-    }
-
-    send_func         = auth_central_tx_tls;
-    recv_func         = auth_central_rx_tls;
-    recv_timeout_func = NULL;
-
-#else
-
-    /* peripheral */
-    if(auth_conn->is_central)
-    {
-        // Invalid config
-        return AUTH_ERROR_INVALID_PARAM;
-    }
-
-    send_func         = auth_periph_tx_tls;
-    recv_func         = auth_periph_rx_tls;
-    recv_timeout_func = NULL;
-
-#endif  /* CONFIG_BT_GATT_CLIENT */
 
     /* set the lower layer transport functions */
-    mbedtls_ssl_set_bio( &mbed_ctx->ssl, auth_conn, send_func, recv_func, recv_timeout_func);
-
-    /* Set the max MTU */
-    mbedtls_ssl_set_mtu(&mbed_ctx->ssl, auth_conn->payload_size);
+    mbedtls_ssl_set_bio( &mbed_ctx->ssl, auth_conn, auth_mbedtls_tx, auth_mbedtls_rx, NULL);
 
     /* set max record len */
     mbedtls_ssl_conf_max_frag_len(&mbed_ctx->conf, MBEDTLS_SSL_MAX_FRAG_LEN_512);
@@ -476,6 +583,15 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
 
         LOG_DBG("Peripheral received initial Client Hello from central.");
     }
+
+    /*  Check if th payload size has been set*/
+    if(auth_conn->payload_size == 0U) {
+        auth_conn->payload_size = bt_gatt_get_mtu(auth_conn->conn) - BLE_LINK_HEADER_BYTES;
+    }
+
+    /* Set the max MTU for DTLS */
+    mbedtls_ssl_set_mtu(&mbed_ctx->ssl, auth_conn->payload_size);
+
 
     int ret = 0;
     // start

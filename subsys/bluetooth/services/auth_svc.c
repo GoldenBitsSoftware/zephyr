@@ -96,7 +96,7 @@ static void gatt_central_write_cb(struct bt_conn *conn, u8_t err, struct bt_gatt
     if(err) {
         LOG_ERR("gatt write failed, err: %d", err);
     } else {
-        LOG_DBG("gatt write success.");
+        LOG_DBG("gatt write success, num bytes: %d", params->length);
     }
 
     auth_conn->write_att_err = err;
@@ -152,6 +152,8 @@ int auth_svc_central_tx(struct authenticate_conn *auth_conn, const unsigned char
         buf += write_count;
         len -= write_count;
     }
+
+    LOG_DBG("Central - num bytes sent: %d", total_write_cnt);
 
     return total_write_cnt;
 }
@@ -210,7 +212,7 @@ int auth_svc_peripheral_tx(struct authenticate_conn *auth_conn, const unsigned c
     {
         send_cnt = MIN(len, auth_conn->payload_size);
 
-        // setup indicate params
+        /* setup indicate params */
         memset(&indicate_params, 0, sizeof(indicate_params));
 
         //indicate_params.uuid ??
@@ -221,10 +223,10 @@ int auth_svc_peripheral_tx(struct authenticate_conn *auth_conn, const unsigned c
 
         ret = bt_gatt_indicate(auth_conn->conn, &indicate_params);
 
-        // wait on semaphore before sending next chunk
+        /* wait on semaphore before sending next chunk */
         ret = k_sem_take(&auth_conn->auth_indicate_sem, 3000 /* TODO: Make this a #define */);
 
-        // on wakeup check if error occurred
+        /* on wakeup check if error occurred */
         if(ret != 0) {
             LOG_ERR("Wait for central indicated failed, err: %d", ret);
             break;
@@ -278,7 +280,7 @@ static void client_ccc_cfg_changed(const struct bt_gatt_attr *attr, u16_t value)
 {
     ARG_UNUSED(attr);
 
-    bool notif_enabled = (value == BT_GATT_CCC_NOTIFY);
+    bool notif_enabled = (value == BT_GATT_CCC_NOTIFY) ? true : false;
 
     LOG_INF("Client notifications %s", notif_enabled ? "enabled" : "disabled");
 }
@@ -298,8 +300,7 @@ static void client_ccc_cfg_changed(const struct bt_gatt_attr *attr, u16_t value)
  * @return
  */
 static ssize_t client_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-                        const void *buf, u16_t len, u16_t offset,
-                        u8_t flags)
+                        const void *buf, u16_t len, u16_t offset, u8_t flags)
 {
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)bt_con_get_context(conn);
 
