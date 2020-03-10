@@ -90,6 +90,7 @@ static struct mbed_tls_context tlscontext[MAX_MBEDTLS_CONTEXT];
 void auth_svc_internal_status_callback(struct authenticate_conn *auth_con , auth_status_t status);
 
 
+
 /* ===================== local functions =========================== */
 
 
@@ -266,7 +267,6 @@ static void auth_mbed_debug(void *ctx, int level, const char *file,
             break;
          }
     }
-    
 }
 
 
@@ -315,6 +315,7 @@ static int auth_mbedtls_tx(void *ctx, const uint8_t *buf, size_t len)
         /* send frame */
         tx_ret = auth_periph_tx(auth_conn, (const uint8_t*)&frame, frame_bytes);
 #endif
+        
 
         if(tx_ret < 0) {
             LOG_ERR("Failed to send TLS frame, error: %d", tx_ret);
@@ -334,6 +335,8 @@ static int auth_mbedtls_tx(void *ctx, const uint8_t *buf, size_t len)
         buf += payload_bytes;
         send_count += payload_bytes;
     }
+
+    LOG_INF("Bytes sent: %d", send_count);
 
     return send_count;
 }
@@ -519,6 +522,16 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
     /* set CA certs into context */
     mbedtls_ssl_conf_ca_chain(&mbed_ctx->conf, &mbed_ctx->cacert, NULL);
 
+    /* Parse the device cert */
+    ret = mbedtls_x509_crt_parse(&mbed_ctx->device_cert, (const unsigned char *)auth_conn->cert_cont->device_cert->cert_data,
+                                 auth_conn->cert_cont->device_cert->cert_len);
+
+    if(ret) {
+        auth_free_mbedcontext(mbed_ctx);
+        LOG_ERR("Failed to parse device cert, error: 0x%x", ret);
+        return AUTH_ERROR_DTLS_INIT_FAILED;
+    }
+
     /* Parse and set the device cert */
     ret = mbedtls_ssl_conf_own_cert(&mbed_ctx->conf, &mbed_ctx->device_cert, &mbed_ctx->device_private_key);
 
@@ -597,12 +610,9 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
     int ret = 0;
     // start
     do {
+
         // do handshake step
         ret = mbedtls_ssl_handshake( &mbed_ctx->ssl );
-
-// DAG DEBUG BEG
-    LOG_ERR("** ret is: 0x%x", ret);
-// DAG DEBUG END
 
         // check return and post status
         //auth_internal_status_callback(struct authenticate_conn *auth_con , auth_status_t status)
