@@ -207,27 +207,32 @@ int auth_svc_peripheral_tx(struct authenticate_conn *auth_conn, const unsigned c
      * read the attribute and send another packet of data. */
     struct bt_gatt_indicate_params indicate_params;
 
+    /* setup indicate params */
+    memset(&indicate_params, 0, sizeof(indicate_params));
+
+
+    indicate_params.uuid = BT_UUID_AUTH_SVC_SERVER_CHAR;
+    indicate_params.attr = auth_conn->auth_client_attr;
+    indicate_params.func = auth_svc_peripheral_indicate;
 
     while (!done)
     {
         send_cnt = MIN(len, auth_conn->payload_size);
 
-        /* setup indicate params */
-        memset(&indicate_params, 0, sizeof(indicate_params));
-
-        //indicate_params.uuid ??
-        indicate_params.attr = auth_conn->auth_client_attr;
-        indicate_params.func = auth_svc_peripheral_indicate;
         indicate_params.data = buf;
         indicate_params.len = send_cnt;  /* bytes to send */
 
         ret = bt_gatt_indicate(auth_conn->conn, &indicate_params);
 
+        if(ret) {
+            LOG_ERR("bt_gatt_indicate failed, error: 0x%x", ret);
+        }
+
         /* wait on semaphore before sending next chunk */
         ret = k_sem_take(&auth_conn->auth_indicate_sem, 3000 /* TODO: Make this a #define */);
 
         /* on wakeup check if error occurred */
-        if(ret != 0) {
+        if(ret) {
             LOG_ERR("Wait for central indicated failed, err: %d", ret);
             break;
         }
