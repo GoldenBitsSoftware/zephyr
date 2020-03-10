@@ -14,6 +14,7 @@
 #include <init.h>
 #include <stdint.h>
 
+
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/hci.h>
 #include <bluetooth/conn.h>
@@ -29,7 +30,7 @@ LOG_MODULE_DECLARE(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 #include "auth_internal.h"
 
 
-#define HANDSHAKE_THRD_STACK_SIZE       1024
+#define HANDSHAKE_THRD_STACK_SIZE       2048
 #define HANDSHAKE_THRD_PRIORITY         0
 
 
@@ -195,8 +196,6 @@ int auth_svc_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_f
 
     return AUTH_SUCCESS;
 }
-
-
 
 /**
  * @see auth_svc.h

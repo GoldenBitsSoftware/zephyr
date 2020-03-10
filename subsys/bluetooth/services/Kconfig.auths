@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 menuconfig BT_GATT_AUTHS
-	bool "Enable GATT Authentiction service"
+	bool "Enable GATT Authentication service"
 	default n
 
 if BT_GATT_AUTHS
