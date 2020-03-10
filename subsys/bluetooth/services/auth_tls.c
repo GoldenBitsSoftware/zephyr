@@ -404,6 +404,7 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
 
         /* copy payload bytes */
         memcpy(buffer, frame.frame_payload, rx_bytes);
+        
 
         len -= rx_bytes;
         receive_cnt += rx_bytes;
@@ -419,6 +420,8 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
         LOG_ERR("Receive buffer from Mbed not large enough.");
         return MBEDTLS_ERR_SSL_BUFFER_TOO_SMALL;
     }
+
+    LOG_DBG("Received %d bytes.", receive_cnt);
 
     return receive_cnt;
 }
