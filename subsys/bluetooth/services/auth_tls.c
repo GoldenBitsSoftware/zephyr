@@ -285,6 +285,7 @@ static int auth_mbedtls_tx(void *ctx, const uint8_t *buf, size_t len)
     int frame_bytes;
     int payload_bytes;
     int send_count = 0;
+    int num_frames = 0;
     int tx_ret;
     struct auth_tls_frame frame;
     const uint16_t max_frame = MIN(sizeof(frame), auth_conn->payload_size);
@@ -303,6 +304,12 @@ static int auth_mbedtls_tx(void *ctx, const uint8_t *buf, size_t len)
         /* is this the last frame? */
         if((len - payload_bytes) == 0) {
             frame.frame_hdr = TLS_FRAME_SYNC_BITS|TLS_FRAME_END;
+
+            // now check if we're only sending one frame, then set the frame
+            // beg flag
+            if(num_frames == 0) {
+                frame.frame_hdr |= TLS_FRAME_BEGIN;
+            }
         }
 
         /* copy body */
@@ -334,6 +341,7 @@ static int auth_mbedtls_tx(void *ctx, const uint8_t *buf, size_t len)
         len -= payload_bytes;
         buf += payload_bytes;
         send_count += payload_bytes;
+        num_frames++;
     }
 
     LOG_INF("Bytes sent: %d", send_count);

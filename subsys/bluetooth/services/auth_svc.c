@@ -45,6 +45,10 @@ u8_t auth_svc_gatt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe
 
     LOG_DBG("num bytes received: %d", length);
 
+    // DAG DEBUG BEG
+    LOG_ERR("*** recevied byte count: %d", length);
+    // DAG DEBUG END
+
     /* This happens when the connection is dropped */
     if(length == 0) {
         /* TODO: signal input buff is ready */
@@ -102,6 +106,12 @@ static void gatt_central_write_cb(struct bt_conn *conn, u8_t err, struct bt_gatt
     auth_conn->write_att_err = err;
 
     k_sem_give(&auth_conn->auth_central_write_sem);
+
+    // DAG DEBUG BEG
+    if(params->length < 20) {
+        LOG_ERR("*** wrote bytes: %d", params->length);
+    }
+    // DAG DEBUG END
 }
 
 /**
@@ -134,8 +144,12 @@ int auth_svc_central_tx(struct authenticate_conn *auth_conn, const unsigned char
             return err;
         }
 
+        // DAG DEBUG BEG
+        LOG_ERR("**** wrote %d bytes.", write_count);
+        // DAG DEBGUG END
+
         /* wait on semaphore for write completion */
-        err = k_sem_take(&auth_conn->auth_central_write_sem, K_MSEC(3000));
+        err = k_sem_take(&auth_conn->auth_central_write_sem, K_MSEC(10000));
 
         if(err) {
             LOG_ERR("Failed to take semaphore, err: %d", err);
