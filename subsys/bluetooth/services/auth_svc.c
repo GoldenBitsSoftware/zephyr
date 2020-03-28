@@ -179,6 +179,8 @@ static void auth_svc_peripheral_indicate(struct bt_conn *conn,
 
     // signal semaphore that chunk fo data was received from the peripheral
     k_sem_give(&auth_conn->auth_indicate_sem);
+
+    LOG_DBG("Peripheral indication, err: %d", err);
 }
 
 /**
@@ -211,7 +213,7 @@ int auth_svc_peripheral_tx(struct authenticate_conn *auth_conn, const unsigned c
     memset(&indicate_params, 0, sizeof(indicate_params));
 
 
-    indicate_params.uuid = BT_UUID_AUTH_SVC_SERVER_CHAR;
+    indicate_params.uuid = BT_UUID_AUTH_SVC_CLIENT_CHAR;
     indicate_params.attr = auth_conn->auth_client_attr;
     indicate_params.func = auth_svc_peripheral_indicate;
 
@@ -349,6 +351,30 @@ BT_GATT_SERVICE_DEFINE(auth_svc,
                                (BT_GATT_PERM_READ|BT_GATT_PERM_WRITE), NULL, client_write, NULL),
 );
 
+// DAG DEBUG BEG
+void  dump_attr_info(const struct bt_gatt_attr *svc_attr)
+{
+    uint16_t value_hdl;
+    const char *uuid_str;
+    do
+    {
+        uuid_str = bt_uuid_str_real(svc_attr->uuid);
+
+        if(uuid_str == NULL) {
+            uuid_str = "<unknown>";
+        }
+
+        value_hdl =  bt_gatt_attr_value_handle(svc_attr);
+
+        LOG_ERR("** attr, uuid: %s, value handle: 0x%x, handle: 0x%x", log_strdup(uuid_str), value_hdl, svc_attr->handle);
+
+        svc_attr = bt_gatt_attr_next(svc_attr);
+
+    } while(svc_attr != NULL);
+}
+
+// DAG DEBUG END
+
 /**
 * @see auth_internal.h
  */
@@ -359,6 +385,17 @@ int auth_svc_get_peripheral_attributes(struct authenticate_conn *auth_conn)
     auth_conn->auth_client_attr = &auth_svc.attrs[1];
 
     auth_conn->auth_server_attr = &auth_svc.attrs[2];
+
+    // DAG DEBUG BEG
+    // iterate through all of the attributes
+    for(uint32_t cnt = 0; cnt < auth_svc.attr_count; cnt++)
+    {
+        LOG_ERR("** attr number: %d", cnt);
+        dump_attr_info(&auth_svc.attrs[cnt]);
+    }
+
+
+    // DAG DEBUG END
 
     return AUTH_SUCCESS;
 }

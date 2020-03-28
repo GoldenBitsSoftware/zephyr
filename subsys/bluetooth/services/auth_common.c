@@ -30,7 +30,7 @@ LOG_MODULE_DECLARE(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 #include "auth_internal.h"
 
 
-#define HANDSHAKE_THRD_STACK_SIZE       2048
+#define HANDSHAKE_THRD_STACK_SIZE       4096
 #define HANDSHAKE_THRD_PRIORITY         0
 
 

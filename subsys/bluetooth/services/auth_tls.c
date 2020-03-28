@@ -82,6 +82,7 @@ struct mbed_tls_context {
     mbedtls_x509_crt device_cert;
     mbedtls_pk_context device_private_key;
     mbedtls_timing_delay_context timer;
+    mbedtls_ssl_cookie_ctx cookie_ctx;
 };
 
 static struct mbed_tls_context tlscontext[MAX_MBEDTLS_CONTEXT];
@@ -131,6 +132,7 @@ static void auth_init_context(struct mbed_tls_context *mbed_ctx)
     mbedtls_x509_crt_init(&mbed_ctx->cacert);
     mbedtls_x509_crt_init(&mbed_ctx->device_cert);
     mbedtls_pk_init(&mbed_ctx->device_private_key);
+    mbedtls_ssl_cookie_init(&mbed_ctx->cookie_ctx);
 
     //mbedtls_entropy_init(&mbed_ctx->entropy);  TODO: Investigate if needed.
     mbedtls_ctr_drbg_init(&mbed_ctx->ctr_drbg);
@@ -429,6 +431,47 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
     return receive_cnt;
 }
 
+/**
+ * Set the DTLS cookie.
+ *
+ * @param auth_conn   Pointer to auth connectoin
+ *
+ * @return 0 on success, else error code.
+ */
+static int auth_tls_set_cookie(struct authenticate_conn *auth_conn)
+{
+    struct bt_conn_info conn_info;
+    uint8_t *cookie_info;
+    size_t cookie_len;
+
+
+    int ret = bt_conn_get_info(auth_conn->conn, &conn_info);
+
+    if(ret) {
+        return ret;
+    }
+
+    struct mbed_tls_context *mbed_ctx = (struct mbed_tls_context *)auth_conn->internal_obj;
+
+    // should not be NULL!!
+    if(!mbed_ctx) {
+        LOG_ERR("No MBED context.");
+        return AUTH_ERROR_INVALID_PARAM;
+    }
+
+    if(BT_CONN_TYPE_LE & conn_info.type) {
+        cookie_info = (uint8_t*)conn_info.le.local->a.val;
+        cookie_len = sizeof(conn_info.le.local->a.val);
+    } else {
+        cookie_info = (uint8_t*)conn_info.br.dst->val;
+        cookie_len = sizeof(conn_info.br.dst->val);
+    }
+
+    ret = mbedtls_ssl_set_client_transport_id(&mbed_ctx->ssl, cookie_info, cookie_len);
+
+    return ret;
+}
+
 
 /* ================= external/internal funcs ==================== */
 /**
@@ -445,13 +488,12 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
     // set conext pointer
     mbed_ctx = auth_get_mbedcontext();
 
-    if(mbed_ctx == NULL)
-    {
+    if (mbed_ctx == NULL) {
         LOG_ERR("Unable to allocate Mbed TLS context.");
         return AUTH_ERROR_NO_RESOURCE;
     }
 
-    if(auth_conn->cert_cont == NULL) {
+    if (auth_conn->cert_cont == NULL) {
         LOG_ERR("Device certs not set.");
         return AUTH_ERROR_INVALID_PARAM;
     }
@@ -467,14 +509,14 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
 
     int endpoint = auth_conn->is_central ? MBEDTLS_SSL_IS_CLIENT : MBEDTLS_SSL_IS_SERVER;
 
-    mbedtls_ssl_config_defaults( &mbed_ctx->conf,
-                               endpoint,
-                               MBEDTLS_SSL_TRANSPORT_DATAGRAM,
-                               MBEDTLS_SSL_PRESET_DEFAULT);
+    mbedtls_ssl_config_defaults(&mbed_ctx->conf,
+                                endpoint,
+                                MBEDTLS_SSL_TRANSPORT_DATAGRAM,
+                                MBEDTLS_SSL_PRESET_DEFAULT);
 
 
     /* set the lower layer transport functions */
-    mbedtls_ssl_set_bio( &mbed_ctx->ssl, auth_conn, auth_mbedtls_tx, auth_mbedtls_rx, NULL);
+    mbedtls_ssl_set_bio(&mbed_ctx->ssl, auth_conn, auth_mbedtls_tx, auth_mbedtls_rx, NULL);
 
     /* set max record len */
     mbedtls_ssl_conf_max_frag_len(&mbed_ctx->conf, MBEDTLS_SSL_MAX_FRAG_LEN_512);
@@ -491,7 +533,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
     ret = mbedtls_pk_parse_key(&mbed_ctx->device_private_key, auth_conn->cert_cont->device_cert->private_key,
                                auth_conn->cert_cont->device_cert->key_len, NULL, 0);
 
-    if(ret) {
+    if (ret) {
         auth_free_mbedcontext(mbed_ctx);
         LOG_ERR("Failed to parse device private key, error: 0x%x", ret);
         return AUTH_ERROR_DTLS_INIT_FAILED;
@@ -500,14 +542,14 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
     /**
      * @brief Setup device certs, the CA chain followed by the end device cert.
      */
-    if(auth_conn->cert_cont->num_ca_certs == 0u) {
+    if (auth_conn->cert_cont->num_ca_certs == 0u) {
         /* log a warning, this maybe intentional */
         LOG_WRN("No CA certs.");
     }
 
-    for(uint8_t cnt = 0; cnt < auth_conn->cert_cont->num_ca_certs; cnt++) {
+    for (uint8_t cnt = 0; cnt < auth_conn->cert_cont->num_ca_certs; cnt++) {
         /* Check if this is a device cert */
-        if(auth_conn->cert_cont->ca_certs[cnt].cert_type == AUTH_CERT_END_DEVICE) {
+        if (auth_conn->cert_cont->ca_certs[cnt].cert_type == AUTH_CERT_END_DEVICE) {
             LOG_WRN("End-Device cert being used as CA cert.");
         }
 
@@ -515,7 +557,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
         ret = mbedtls_x509_crt_parse(&mbed_ctx->cacert, auth_conn->cert_cont->ca_certs[cnt].cert_data,
                                      auth_conn->cert_cont->ca_certs[cnt].cert_len);
 
-        if(ret) {
+        if (ret) {
             auth_free_mbedcontext(mbed_ctx);
             LOG_ERR("Failed to parse CA cert, error: 0x%x", ret);
             return AUTH_ERROR_DTLS_INIT_FAILED;
@@ -526,10 +568,11 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
     mbedtls_ssl_conf_ca_chain(&mbed_ctx->conf, &mbed_ctx->cacert, NULL);
 
     /* Parse the device cert */
-    ret = mbedtls_x509_crt_parse(&mbed_ctx->device_cert, (const unsigned char *)auth_conn->cert_cont->device_cert->cert_data,
+    ret = mbedtls_x509_crt_parse(&mbed_ctx->device_cert,
+                                 (const unsigned char *) auth_conn->cert_cont->device_cert->cert_data,
                                  auth_conn->cert_cont->device_cert->cert_len);
 
-    if(ret) {
+    if (ret) {
         auth_free_mbedcontext(mbed_ctx);
         LOG_ERR("Failed to parse device cert, error: 0x%x", ret);
         return AUTH_ERROR_DTLS_INIT_FAILED;
@@ -538,7 +581,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
     /* Parse and set the device cert */
     ret = mbedtls_ssl_conf_own_cert(&mbed_ctx->conf, &mbed_ctx->device_cert, &mbed_ctx->device_private_key);
 
-    if(ret) {
+    if (ret) {
         auth_free_mbedcontext(mbed_ctx);
         LOG_ERR("Failed to set device cert and key, error: 0x%x", ret);
         return AUTH_ERROR_DTLS_INIT_FAILED;
@@ -546,12 +589,28 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
 
 
     /* setup call to Zephyr random API */
-    mbedtls_ssl_conf_rng( &mbed_ctx->conf, auth_tls_drbg_random, &mbed_ctx->ctr_drbg );
-    mbedtls_ssl_conf_dbg( &mbed_ctx->conf, auth_mbed_debug, auth_conn);
+    mbedtls_ssl_conf_rng(&mbed_ctx->conf, auth_tls_drbg_random, &mbed_ctx->ctr_drbg);
+    mbedtls_ssl_conf_dbg(&mbed_ctx->conf, auth_mbed_debug, auth_conn);
 
 #if defined(MBEDTLS_DEBUG_C)
     mbedtls_debug_set_threshold(3); // Should be KConfig option
 #endif
+
+    if (!auth_conn->is_central) {
+
+        ret = mbedtls_ssl_cookie_setup(&mbed_ctx->cookie_ctx, mbedtls_ctr_drbg_random, &mbed_ctx->ctr_drbg);
+
+        if(ret) {
+            auth_free_mbedcontext(mbed_ctx);
+            LOG_ERR("Failed to setup dtls cookies, error: 0x%x", ret);
+            return AUTH_ERROR_DTLS_INIT_FAILED;
+        }
+
+        mbedtls_ssl_conf_dtls_cookies(&mbed_ctx->conf, mbedtls_ssl_cookie_write, mbedtls_ssl_cookie_check,
+                                      &mbed_ctx->cookie_ctx);
+
+    }
+
 
     ret = mbedtls_ssl_setup(&mbed_ctx->ssl, &mbed_ctx->conf);
 
@@ -577,6 +636,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
  * @param arg3
  */
 void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
+
     struct authenticate_conn *auth_conn = (struct authenticate_conn *) arg1;
     struct mbed_tls_context *mbed_ctx = (struct mbed_tls_context *) auth_conn->internal_obj;
 
@@ -591,10 +651,23 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
 
     if (!auth_conn->is_central) {
 
+        /**
+         * For the peripheral (acting as a the DTLS server), use the connection handle
+         * as the
+         */
+        int ret = auth_tls_set_cookie(auth_conn);
+
+        if(ret) {
+            LOG_ERR("Failed to get connection info for DTLS cookie, auth failed, error: 0x%x", ret);
+            auth_svc_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
+            return;
+        }
+
         int bytecount = auth_svc_buffer_bytecount_wait(&auth_conn->rx_buf, 15000u);
 
         if(bytecount <= 0) {
-            LOG_ERR("Peripheral did not receive initial Client Hello, error: %d", bytecount);
+            LOG_ERR("Peripheral did not receive initial Client Hello, auth failed, error: %d", bytecount);
+            auth_svc_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
             return;
         }
 
@@ -620,6 +693,24 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
         // check return and post status
         //auth_internal_status_callback(struct authenticate_conn *auth_con , auth_status_t status)
 
+        if(ret == MBEDTLS_ERR_SSL_HELLO_VERIFY_REQUIRED) {
+
+            /* restart handshake to process client cookie */
+            LOG_DBG("Restarting handshake, need client cookie.");
+
+            mbedtls_ssl_session_reset(&mbed_ctx->ssl);
+
+            /* reset cookie info */
+            ret = auth_tls_set_cookie(auth_conn);
+
+            if(ret) {
+                LOG_ERR("Failed to reset cookie information, error: 0x%x", ret);
+                ret = MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+            } else {
+                ret = MBEDTLS_ERR_SSL_WANT_READ;
+            }
+        }
+
         // Check if we should cancel
         // if(auth_conn->cancel)
         // {
@@ -635,6 +726,8 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
     //     AUTH_FAILED,
     //     AUTH_SUCCESSFUL
     //auth_internal_status_callback(struct authenticate_conn *auth_con , auth_status_t status)
+
+    //            auth_svc_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
 
     return;
 }
