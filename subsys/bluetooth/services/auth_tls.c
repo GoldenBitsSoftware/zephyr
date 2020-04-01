@@ -49,7 +49,7 @@ LOG_MODULE_DECLARE(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 
 #define MAX_MBEDTLS_CONTEXT     5
 
-#define TLS_FRAME_SIZE          256u
+#define TLS_FRAME_SIZE          256u  /* should be at least as large as teh MTU */
 
 #define TLS_FRAME_SYNC_BITS     0xA590
 #define TLS_FRAME_SYNC_MASK     0xFFF0
@@ -301,6 +301,7 @@ static int auth_mbedtls_tx(void *ctx, const uint8_t *buf, size_t len)
         /* get payload bytes */
         payload_bytes = MIN(max_payload, len);
 
+
         frame_bytes = payload_bytes + sizeof(frame.frame_hdr);
 
         /* is this the last frame? */
@@ -351,7 +352,35 @@ static int auth_mbedtls_tx(void *ctx, const uint8_t *buf, size_t len)
     return send_count;
 }
 
+// DAG DEBUG BEG
+static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
+{
+    int rx_bytes;
+    struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
 
+#if defined(CONFIG_BT_GATT_CLIENT)
+    rx_bytes = auth_central_rx(auth_conn, buffer, len);
+#else
+    rx_bytes = auth_periph_rx(auth_conn, buffer, len);
+#endif
+
+    /* check for error */
+    if(rx_bytes < 0) {
+        LOG_ERR("Failed to receive TLS frame, error: %d", rx_bytes);
+
+        if(rx_bytes == -EAGAIN) {
+            return MBEDTLS_ERR_SSL_TIMEOUT;
+        }
+
+        return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+    }
+
+
+    return rx_bytes;
+}
+
+
+#if 0
 /**
  *  MBed TLS receive function, called by the MBed library to receive data.
  *
@@ -369,7 +398,9 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
     int rx_bytes;
     int receive_cnt = 0;
     struct auth_tls_frame frame;
+    static uint32_t frame_bytes;
 
+    frame_bytes = 0;
     while(!last_frame && len != 0U) {
 
         rx_bytes = MIN(sizeof(frame.frame_payload), len) + sizeof(frame.frame_hdr);
@@ -398,6 +429,8 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
                 LOG_ERR("Missing beginning frame");
                 return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
             }
+            LOG_DBG("Got BEGIN frame.");
+            frame_bytes = 0;
         }
 
         /* check frame sync bytes */
@@ -422,10 +455,12 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
         len -= rx_bytes;
         receive_cnt += rx_bytes;
         buffer += rx_bytes;
+        frame_bytes += rx_bytes;
 
         /* Is this the last frame? */
         if(frame.frame_hdr & TLS_FRAME_END) {
             last_frame = true;
+            LOG_DBG("Got LAST frame, total bytes: %d", frame_bytes);
         }
     }
 
@@ -438,6 +473,8 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
 
     return receive_cnt;
 }
+#endif
+// DAG DEBUG END
 
 /**
  * Set the DTLS cookie.
@@ -688,7 +725,7 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
     }
 
     /* Set the max MTU for DTLS */
-    mbedtls_ssl_set_mtu(&mbed_ctx->ssl, auth_conn->payload_size);
+    //mbedtls_ssl_set_mtu(&mbed_ctx->ssl, auth_conn->payload_size);
 
 
     int ret = 0;
@@ -740,3 +777,92 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
     return;
 }
 
+// DAG DEBUG BEG
+static uint8_t rx_buf[600];
+static uint32_t rx_curr_offset;
+static bool rx_first_frame = true;
+int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *buffer, size_t buflen)
+{
+    struct auth_tls_frame *rx_frame;
+    int free_buf_space;
+
+    // read a frame from the peer
+
+    rx_frame = (struct auth_tls_frame *)buffer;
+
+
+    /* check for start flag */
+    if(rx_first_frame) {
+        rx_first_frame = false;
+        if(!(rx_frame->frame_hdr & TLS_FRAME_BEGIN)) {
+
+            /* reset vars */
+            rx_curr_offset = 0;
+            rx_first_frame = true;
+
+            LOG_ERR("RX-Missing beginning frame");
+            return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+        }
+        LOG_DBG("RX-Got BEGIN frame.");
+        rx_curr_offset = 0;
+    }
+
+    /* check frame sync bytes */
+    if((rx_frame->frame_hdr & TLS_FRAME_SYNC_MASK) != TLS_FRAME_SYNC_BITS) {
+        /* reset vars */
+        rx_curr_offset = 0;
+        rx_first_frame = true;
+
+        LOG_ERR("RX-Invalid frame.");
+        return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+    }
+
+    /* Subtract out frame header */
+    buflen -= sizeof(rx_frame->frame_hdr);
+
+    /* move beyond frame header */
+    buffer += sizeof(rx_frame->frame_hdr);
+
+    /* sanity check, if zero or negative */
+    if(buflen <= 0) {
+        /* reset vars */
+        rx_curr_offset = 0;
+        rx_first_frame = true;
+        LOG_ERR("RX-Empty frame!!");
+        return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+    }
+
+    /* ensure there's enough free space in our temp buffer */
+    free_buf_space = sizeof(rx_buf) - rx_curr_offset;
+
+    if(free_buf_space < buflen) {
+        /* reset vars */
+        rx_curr_offset = 0;
+        rx_first_frame = true;
+        LOG_ERR("RX-not enough free space");
+        return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+    }
+
+    /* copy payload bytes */
+    memcpy(rx_buf + rx_curr_offset, buffer, buflen);
+
+    rx_curr_offset += buflen;
+
+    /* Is this the last frame? */
+    if(rx_frame->frame_hdr & TLS_FRAME_END) {
+
+        LOG_DBG("RX-Got LAST frame, total bytes: %d", rx_curr_offset);
+
+        /* copy into receive buffer */
+        auth_svc_buffer_put(&auth_conn->rx_buf, rx_buf, rx_curr_offset);
+
+        /* reset vars */
+        rx_curr_offset = 0;
+        rx_first_frame = true;
+    }
+
+    return 0;
+
+}
+
+// DAG DEBUG GNED
