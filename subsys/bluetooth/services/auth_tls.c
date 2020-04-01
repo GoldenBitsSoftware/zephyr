@@ -49,7 +49,7 @@ LOG_MODULE_DECLARE(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 
 #define MAX_MBEDTLS_CONTEXT     5
 
-#define TLS_FRAME_SIZE          256u
+#define TLS_FRAME_SIZE          550u
 
 #define TLS_FRAME_SYNC_BITS     0xA590
 #define TLS_FRAME_SYNC_MASK     0xFFF0
@@ -688,7 +688,7 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
     }
 
     /* Set the max MTU for DTLS */
-    mbedtls_ssl_set_mtu(&mbed_ctx->ssl, auth_conn->payload_size);
+    //mbedtls_ssl_set_mtu(&mbed_ctx->ssl, auth_conn->payload_size);
 
 
     int ret = 0;
