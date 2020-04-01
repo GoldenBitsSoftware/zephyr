@@ -30,6 +30,10 @@ LOG_MODULE_REGISTER(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 
 #if defined(CONFIG_BT_GATT_CLIENT)
 
+// DAG DEBUG BEG
+int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *buffer, size_t buflen);
+// DAG DEBUG END
+
 /**
  * @see auth_internal.h
  */
@@ -55,13 +59,15 @@ u8_t auth_svc_gatt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe
         return BT_GATT_ITER_CONTINUE;
     }
 
-    int numbytes = auth_svc_buffer_put(&auth_conn->rx_buf, data, length);
+// DAG DEBUG BEG
+    int numbytes = auth_dtls_receive_frame(auth_conn, (const uint8_t*)data, length);
+    //int numbytes = auth_svc_buffer_put(&auth_conn->rx_buf, data, length);
 
-
-    if((numbytes < 0) || (numbytes != length)) {
+    if((numbytes < 0)  {
         LOG_ERR("Failed to set all received bytes, err: %d", numbytes);
-        return BT_GATT_ITER_CONTINUE;
     }
+
+// DAG DEBUG END
 
     return BT_GATT_ITER_CONTINUE;
 }
@@ -327,8 +333,16 @@ static ssize_t client_write(struct bt_conn *conn, const struct bt_gatt_attr *att
 
     LOG_DBG("client write called, len: %d", len);
 
+
+// DAG DEBUG BEG
+    // handle framing....
+    int err = auth_dtls_receive_frame(auth_conn, buf, len);
+    //int numbytes = auth_svc_buffer_put(&auth_conn->rx_buf, data, length);
+
     /* put bytes into buffer */
-    int err = auth_svc_buffer_put(&auth_conn->rx_buf, (const uint8_t*)buf,  len);
+    //int err = auth_svc_buffer_put(&auth_conn->rx_buf, (const uint8_t*)buf,  len);
+// DAG DEBUG END
+
 
     /* return number of bytes writen */
     /* TODO: Test case where only a partial write occured */
@@ -366,7 +380,7 @@ BT_GATT_SERVICE_DEFINE(auth_svc,
 );
 
 // DAG DEBUG BEG
-void  dump_attr_info(const struct bt_gatt_attr *svc_attr)
+void dump_attr_info(const struct bt_gatt_attr *svc_attr)
 {
     uint16_t value_hdl;
     const char *uuid_str;
