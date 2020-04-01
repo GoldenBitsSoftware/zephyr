@@ -63,7 +63,7 @@ u8_t auth_svc_gatt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe
     int numbytes = auth_dtls_receive_frame(auth_conn, (const uint8_t*)data, length);
     //int numbytes = auth_svc_buffer_put(&auth_conn->rx_buf, data, length);
 
-    if((numbytes < 0)  {
+    if(numbytes < 0)  {
         LOG_ERR("Failed to set all received bytes, err: %d", numbytes);
     }
 
