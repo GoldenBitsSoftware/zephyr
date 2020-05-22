@@ -26,13 +26,11 @@ LOG_MODULE_REGISTER(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 
 #include "auth_internal.h"
 
-
-
-#if defined(CONFIG_BT_GATT_CLIENT)
-
 // DAG DEBUG BEG
 int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *buffer, size_t buflen);
 // DAG DEBUG END
+
+#if defined(CONFIG_BT_GATT_CLIENT)
 
 /**
  * @see auth_internal.h
