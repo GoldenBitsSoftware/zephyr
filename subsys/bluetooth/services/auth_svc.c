@@ -327,8 +327,14 @@ static ssize_t client_write(struct bt_conn *conn, const struct bt_gatt_attr *att
 
 // DAG DEBUG BEG
     // handle framing....
+    /* returns 0 on success, else negative on failure */
     int err = auth_dtls_receive_frame(auth_conn, buf, len);
     //int numbytes = auth_svc_buffer_put(&auth_conn->rx_buf, data, length);
+
+    /* if no error, need to return num of bytes handled. */
+    if(err >= 0) {
+         err = len;
+    }
 
     /* put bytes into buffer */
     //int err = auth_svc_buffer_put(&auth_conn->rx_buf, (const uint8_t*)buf,  len);

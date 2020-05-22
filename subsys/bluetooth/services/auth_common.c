@@ -420,6 +420,12 @@ int auth_svc_buffer_put(struct auth_io_buffer *iobuf, const uint8_t *in_buf,  in
         return AUTH_ERROR_IOBUFF_FULL;
     }
 
+    /* don't put negative or zero bytes */
+    if(num_bytes <= 0) {
+        return 0;
+    }
+
+
     /* lock mutex */
     int err = k_mutex_lock(&iobuf->buf_mutex, K_FOREVER);
     if(err) {
