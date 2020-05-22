@@ -11,7 +11,7 @@
 /**
  * @brief  Timeout in Msec when waiting for GATT or L2CAP read/write to complete.
  */
-#define AUTH_SVC_IO_TIMEOUT_MSEC            (3000u)
+#define AUTH_SVC_IO_TIMEOUT_MSEC            (15000u)
 
 
 /**

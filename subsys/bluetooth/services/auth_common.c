@@ -493,17 +493,40 @@ int auth_svc_buffer_get_wait(struct auth_io_buffer *iobuf, uint8_t *out_buf,  in
         return bytecount;
     }
 
-    int err = k_sem_take(&iobuf->buf_sem, K_MSEC(waitmsec));
+    do
+    {
+        int err = k_sem_take(&iobuf->buf_sem, K_MSEC(waitmsec));
 
-    if(err) {
-        return err;  /* timed out -EAGAIN or error */
-    }
+        if (err) {
+            return err;  /* timed out -EAGAIN or error */
+        }
 
-    /* return byte count or error (bytecount < 0) */
-    bytecount = auth_svc_buffer_get(iobuf, out_buf, num_bytes);
+        /* return byte count or error (bytecount < 0) */
+        bytecount = auth_svc_buffer_get(iobuf, out_buf, num_bytes);
+
+    } while(bytecount == 0);
 
     return bytecount;
 }
+
+#if 0
+#define PACKET_SYNC_BYTES       0x8EFA
+typedef struct
+{
+    uint16_t sync_bytes;
+    uint16_t len;
+} packet_hdr_t;
+
+int auth_svc_buffer_get_wait(struct auth_io_buffer *iobuf, uint8_t *out_buf,  int num_bytes, int waitmsec)
+{
+    packet_hdr_t pkt_hdr;
+
+    int bytescnt = auth_svc_buffer_peek(iobuf, &pkt_hdr, sizeof(pkt_hdr));
+
+    if(bytescnt == 0)
+
+}
+#endif
 
 
 /**

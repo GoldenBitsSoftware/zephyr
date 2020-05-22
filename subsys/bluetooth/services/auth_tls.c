@@ -354,16 +354,46 @@ static int auth_mbedtls_tx(void *ctx, const uint8_t *buf, size_t len)
 }
 
 // DAG DEBUG BEG
+#define DTLS_PACKET_MARKER      0x45B86A3E
+typedef struct {
+    uint32_t marker;            // use magic number to identify header
+    uint16_t packet_len;
+} dtls_packet_hdr_t;
+
+
 static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
 {
     int rx_bytes;
+    dtls_packet_hdr_t dtls_hdr;
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
 
 #if defined(CONFIG_BT_GATT_CLIENT)
-    rx_bytes = auth_central_rx(auth_conn, buffer, len);
+    rx_bytes = auth_central_rx(auth_conn, (uint8_t*)&dtls_hdr, sizeof(dtls_hdr));
 #else
-    rx_bytes = auth_periph_rx(auth_conn, buffer, len);
+    rx_bytes = auth_periph_rx(auth_conn, (uint8_t*) &dtls_hdr, sizeof(dtls_hdr));
 #endif
+
+    /* TODO: Refactor this entire routine, should read as many
+     * whole packets as possible if there's enough room */
+    if(rx_bytes == sizeof(dtls_hdr)) {
+
+        if(dtls_hdr.marker != DTLS_PACKET_MARKER) {
+
+            /* Question: Should the entire receive buffer be flushed? */
+            LOG_ERR("Missing DTLS header.");
+            return 0;
+        }
+
+        /* read the packet */
+#if defined(CONFIG_BT_GATT_CLIENT)
+        rx_bytes = auth_central_rx(auth_conn, buffer, dtls_hdr.packet_len);
+#else
+        rx_bytes = auth_periph_rx(auth_conn, buffer, dtls_hdr.packet_len);
+#endif
+
+    } else if (rx_bytes == 0) {
+        LOG_ERR("Received zero bytes.");
+    }
 
     /* check for error */
     if(rx_bytes < 0) {
@@ -375,6 +405,13 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
 
         return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
     }
+
+// DAG DEBUG BEG
+LOG_ERR("** read: %d, requested: %d", rx_bytes, len);
+if(rx_bytes > 530) {
+	LOG_ERR("** read more than 530 bytes, total: %d", rx_bytes);
+}
+// DAG DEBUG END
 
 
     return rx_bytes;
@@ -569,7 +606,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
 
     /* Set the DTLS time out */
     /* TODO: Make these KConfig vars */
-    mbedtls_ssl_conf_handshake_timeout(&mbed_ctx->conf, 2000u, 15000u);
+    mbedtls_ssl_conf_handshake_timeout(&mbed_ctx->conf, 10000u, 30000u);
 
     /* OPTIONAL is usually a bad choice for security, but makes interop easier
      * in this simplified example, in which the ca chain is hardcoded.
@@ -639,7 +676,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
     mbedtls_ssl_conf_dbg(&mbed_ctx->conf, auth_mbed_debug, auth_conn);
 
 #if defined(MBEDTLS_DEBUG_C)
-    mbedtls_debug_set_threshold(3); // Should be KConfig option
+    mbedtls_debug_set_threshold(0); // Should be KConfig option
 #endif
 
     if (!auth_conn->is_central) {
@@ -725,8 +762,9 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
         auth_conn->payload_size = bt_gatt_get_mtu(auth_conn->conn) - BLE_LINK_HEADER_BYTES;
     }
 
-    /* Set the max MTU for DTLS */
-    //mbedtls_ssl_set_mtu(&mbed_ctx->ssl, auth_conn->payload_size);
+    // DAG DEBUG BEG
+    int prev_state = 0xFF;
+    // DAG DEBUG END
 
 
     int ret = 0;
@@ -735,6 +773,16 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
 
         // do handshake step
         ret = mbedtls_ssl_handshake( &mbed_ctx->ssl );
+
+
+        // DAG DEBUG BEG
+        if(prev_state != mbed_ctx->ssl.state) {
+            // print handshake state
+            LOG_ERR("Handshake state: %d", mbed_ctx->ssl.state);
+            prev_state = mbed_ctx->ssl.state;
+        }
+        // DAG DEBUG END
+
 
         // check return and post status
         //auth_internal_status_callback(struct authenticate_conn *auth_con , auth_status_t status)
@@ -767,6 +815,13 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
     } while( ret == MBEDTLS_ERR_SSL_WANT_READ ||
              ret == MBEDTLS_ERR_SSL_WANT_WRITE );
 
+    if(ret == 0) {
+        LOG_DBG("DTLS Handshake success.");
+    } else {
+        LOG_ERR("DTLS Handshake failed, error: 0x%x", ret);
+    }
+
+
     // final status
     //      AUTH_CANCELED,
     //     AUTH_FAILED,
@@ -786,6 +841,7 @@ int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *
 {
     struct auth_tls_frame *rx_frame;
     int free_buf_space;
+    dtls_packet_hdr_t *dtls_hdr = NULL;
 
     // read a frame from the peer
 
@@ -798,7 +854,7 @@ int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *
         if(!(rx_frame->frame_hdr & TLS_FRAME_BEGIN)) {
 
             /* reset vars */
-            rx_curr_offset = 0;
+            rx_curr_offset = sizeof(dtls_packet_hdr_t);
             rx_first_frame = true;
 
             LOG_ERR("RX-Missing beginning frame");
@@ -811,7 +867,7 @@ int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *
     /* check frame sync bytes */
     if((rx_frame->frame_hdr & TLS_FRAME_SYNC_MASK) != TLS_FRAME_SYNC_BITS) {
         /* reset vars */
-        rx_curr_offset = 0;
+        rx_curr_offset = sizeof(dtls_packet_hdr_t);;
         rx_first_frame = true;
 
         LOG_ERR("RX-Invalid frame.");
@@ -838,7 +894,7 @@ int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *
 
     if(free_buf_space < buflen) {
         /* reset vars */
-        rx_curr_offset = 0;
+        rx_curr_offset = sizeof(dtls_packet_hdr_t);;
         rx_first_frame = true;
         LOG_ERR("RX-not enough free space");
         return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
@@ -854,16 +910,33 @@ int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *
 
         LOG_DBG("RX-Got LAST frame, total bytes: %d", rx_curr_offset);
 
-        /* copy into receive buffer */
-        auth_svc_buffer_put(&auth_conn->rx_buf, rx_buf, rx_curr_offset);
+        int free_bytes = auth_svc_buffer_bytecount(&auth_conn->rx_buf);
+
+
+        /* Is there enough free space to write record? */
+        if( free_bytes >= (sizeof(dtls_packet_hdr_t) + rx_curr_offset)) {
+
+            /* Header is at beginning of the rx buffer */
+            dtls_hdr = (dtls_packet_hdr_t *)rx_buf;
+
+            dtls_hdr->marker = DTLS_PACKET_MARKER;
+            dtls_hdr->packet_len = rx_curr_offset - sizeof(dtls_packet_hdr_t);
+
+            /* copy into receive buffer */
+            auth_svc_buffer_put(&auth_conn->rx_buf, rx_buf, rx_curr_offset);
+
+        } else {
+            int needed = (sizeof(dtls_packet_hdr_t) + rx_curr_offset) - free_bytes;
+            LOG_ERR("Not enough room in receive buffer (need %d bytes), dropping DTLS packet.", needed);
+        }
 
         /* reset vars */
-        rx_curr_offset = 0;
+        rx_curr_offset = sizeof(dtls_packet_hdr_t);;
         rx_first_frame = true;
     }
 
     return 0;
-
 }
 
-// DAG DEBUG GNED
+// DAG DEBUG END
+
