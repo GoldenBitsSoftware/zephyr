@@ -860,8 +860,9 @@ int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *
             LOG_ERR("RX-Missing beginning frame");
             return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
         }
+
         LOG_DBG("RX-Got BEGIN frame.");
-        rx_curr_offset = 0;
+        rx_curr_offset = sizeof(dtls_packet_hdr_t);;
     }
 
     /* check frame sync bytes */
@@ -894,7 +895,7 @@ int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *
 
     if(free_buf_space < buflen) {
         /* reset vars */
-        rx_curr_offset = sizeof(dtls_packet_hdr_t);;
+        rx_curr_offset = sizeof(dtls_packet_hdr_t);
         rx_first_frame = true;
         LOG_ERR("RX-not enough free space");
         return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
@@ -931,7 +932,7 @@ int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *
         }
 
         /* reset vars */
-        rx_curr_offset = sizeof(dtls_packet_hdr_t);;
+        rx_curr_offset = sizeof(dtls_packet_hdr_t);
         rx_first_frame = true;
     }
 
