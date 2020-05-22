@@ -910,7 +910,7 @@ int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *
 
         LOG_DBG("RX-Got LAST frame, total bytes: %d", rx_curr_offset);
 
-        int free_bytes = auth_svc_buffer_bytecount(&auth_conn->rx_buf);
+        int free_bytes = auth_svc_buffer_avail_bytes(&auth_conn->rx_buf);
 
 
         /* Is there enough free space to write record? */

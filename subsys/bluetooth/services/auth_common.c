@@ -647,6 +647,14 @@ int auth_svc_buffer_bytecount_wait(struct auth_io_buffer *iobuf, uint32_t waitms
 /**
  * @see auth_internal.h
  */
+int auth_svc_buffer_avail_bytes(struct auth_io_buffer *iobuf)
+{
+    return (AUTH_SVC_IOBUF_LEN -  auth_svc_buffer_bytecount(iobuf));
+}
+
+/**
+ * @see auth_internal.h
+ */
 bool auth_svc_buffer_isfull(struct auth_io_buffer *iobuf)
 {
     return (auth_svc_buffer_bytecount(iobuf) == AUTH_SVC_IOBUF_LEN) ? true : false;

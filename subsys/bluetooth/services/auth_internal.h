@@ -320,6 +320,16 @@ int auth_svc_buffer_bytecount(struct auth_io_buffer *iobuf);
  */
 int auth_svc_buffer_bytecount_wait(struct auth_io_buffer *iobuf, uint32_t waitmsec);
 
+
+/**
+ * Return the number of available bytes to write into buffer.
+ *
+ * @param iobuf   Pointer to IO buffer struct.
+ *
+ * @return       Number of bytes avail to use.
+ */
+int auth_svc_buffer_avail_bytes(struct auth_io_buffer *iobuf);
+
 /**
  * Determines if the buffer is full;
  *
