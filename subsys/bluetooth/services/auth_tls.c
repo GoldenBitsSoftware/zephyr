@@ -405,12 +405,11 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
     }
 
 // DAG DEBUG BEG
-LOG_ERR("** read: %d, requested: %d", rx_bytes, len);
-if(rx_bytes > 530) {
-	LOG_ERR("** read more than 530 bytes, total: %d", rx_bytes);
-}
+        LOG_ERR("** read: %d, requested: %d", rx_bytes, len);
+        if(rx_bytes > 530) {
+            LOG_ERR("** read more than 530 bytes, total: %d", rx_bytes);
+        }
 // DAG DEBUG END
-
 
     return rx_bytes;
 }
@@ -769,9 +768,23 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
     // start
     do {
 
-        // do handshake step
-        ret = mbedtls_ssl_handshake( &mbed_ctx->ssl );
+        while(mbed_ctx->ssl.state != MBEDTLS_SSL_HANDSHAKE_OVER)
+        {
+            // DAG DEBUG BEG
+            LOG_ERR("** STARTING Handshake state: %d", mbed_ctx->ssl.state);
+            // DAG DEBUG END
 
+            // do handshake step
+            ret = mbedtls_ssl_handshake_step(&mbed_ctx->ssl);
+
+            // DAG DEBUG BEG
+            LOG_ERR("**Handshake state: %d, ret: 0x%x", mbed_ctx->ssl.state, ret);
+            // DAG DEBUG END
+
+            if(ret != 0) {
+                break;
+            }
+        }
 
         // DAG DEBUG BEG
         if(prev_state != mbed_ctx->ssl.state) {
@@ -832,6 +845,9 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
 }
 
 // DAG DEBUG BEG
+static uint8_t dump_buffer[700];
+
+
 static uint8_t rx_buf[600];
 static uint32_t rx_curr_offset;
 static bool rx_first_frame = true;
@@ -926,6 +942,16 @@ int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *
         } else {
             int need = rx_curr_offset - free_bytes;
             LOG_ERR("Not enough room in RX buffer, free: %d, need %d bytes.", free_bytes, need);
+
+            // DAG DEBUG BEG
+            while(auth_svc_buffer_bytecount(&auth_conn->rx_buf) > 0) {
+
+                // start dumping contents of buffer
+                int dumpbyte_cnt = auth_mbedtls_rx(auth_conn, dump_buffer, sizeof(dump_buffer));
+
+                LOG_ERR("**Dumped %d bytes", dumpbyte_cnt);
+            }
+            // DAG DEUBG END
         }
 
         /* reset vars */
