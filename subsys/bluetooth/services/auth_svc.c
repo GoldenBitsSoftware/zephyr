@@ -189,7 +189,10 @@ static void auth_svc_peripheral_indicate(struct bt_conn *conn,
     // signal semaphore that chunk fo data was received from the peripheral
     k_sem_give(&auth_conn->auth_indicate_sem);
 
-    LOG_DBG("Peripheral indication, err: %d", err);
+    /* if an error occured */
+    if(err != 0) {
+	LOG_DBG("Peripheral indication, err: %d", err);
+    }
 }
 
 /**
@@ -210,7 +213,8 @@ int auth_svc_peripheral_tx(struct authenticate_conn *auth_conn, const unsigned c
     }
 
 
-    LOG_DBG("auth_svc_peripheral_tx(), sending %d bytes.", len);
+    /* a little too verbose */
+    /* LOG_DBG("auth_svc_peripheral_tx(), sending %d bytes.", len); */
 
 
     /* Setup the indicate params.  The client will use BLE indications vs.
