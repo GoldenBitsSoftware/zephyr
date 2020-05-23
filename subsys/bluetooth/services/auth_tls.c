@@ -302,7 +302,6 @@ static int auth_mbedtls_tx(void *ctx, const uint8_t *buf, size_t len)
         /* get payload bytes */
         payload_bytes = MIN(max_payload, len);
 
-
         frame_bytes = payload_bytes + sizeof(frame.frame_hdr);
 
         /* is this the last frame? */
@@ -326,7 +325,6 @@ static int auth_mbedtls_tx(void *ctx, const uint8_t *buf, size_t len)
         /* send frame */
         tx_ret = auth_periph_tx(auth_conn, (const uint8_t*)&frame, frame_bytes);
 #endif
-        
 
         if(tx_ret < 0) {
             LOG_ERR("Failed to send TLS frame, error: %d", tx_ret);
@@ -844,9 +842,7 @@ int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *
     dtls_packet_hdr_t *dtls_hdr = NULL;
 
     // read a frame from the peer
-
     rx_frame = (struct auth_tls_frame *)buffer;
-
 
     /* check for start flag */
     if(rx_first_frame) {
@@ -862,13 +858,13 @@ int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *
         }
 
         LOG_DBG("RX-Got BEGIN frame.");
-        rx_curr_offset = sizeof(dtls_packet_hdr_t);;
+        rx_curr_offset = sizeof(dtls_packet_hdr_t);
     }
 
     /* check frame sync bytes */
     if((rx_frame->frame_hdr & TLS_FRAME_SYNC_MASK) != TLS_FRAME_SYNC_BITS) {
         /* reset vars */
-        rx_curr_offset = sizeof(dtls_packet_hdr_t);;
+        rx_curr_offset = sizeof(dtls_packet_hdr_t);
         rx_first_frame = true;
 
         LOG_ERR("RX-Invalid frame.");
@@ -884,7 +880,7 @@ int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *
     /* sanity check, if zero or negative */
     if(buflen <= 0) {
         /* reset vars */
-        rx_curr_offset = 0;
+        rx_curr_offset = sizeof(dtls_packet_hdr_t);
         rx_first_frame = true;
         LOG_ERR("RX-Empty frame!!");
         return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
@@ -909,13 +905,14 @@ int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *
     /* Is this the last frame? */
     if(rx_frame->frame_hdr & TLS_FRAME_END) {
 
-        LOG_DBG("RX-Got LAST frame, total bytes: %d", rx_curr_offset);
+        /* log number payload bytes received, don't include dtls header */
+        LOG_DBG("RX-Got LAST frame, total bytes: %d", rx_curr_offset - sizeof(dtls_packet_hdr_t));
 
         int free_bytes = auth_svc_buffer_avail_bytes(&auth_conn->rx_buf);
 
 
         /* Is there enough free space to write record? */
-        if( free_bytes >= (sizeof(dtls_packet_hdr_t) + rx_curr_offset)) {
+        if(free_bytes >=  rx_curr_offset) {
 
             /* Header is at beginning of the rx buffer */
             dtls_hdr = (dtls_packet_hdr_t *)rx_buf;
@@ -927,8 +924,8 @@ int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *
             auth_svc_buffer_put(&auth_conn->rx_buf, rx_buf, rx_curr_offset);
 
         } else {
-            int needed = (sizeof(dtls_packet_hdr_t) + rx_curr_offset) - free_bytes;
-            LOG_ERR("Not enough room in receive buffer (need %d bytes), dropping DTLS packet.", needed);
+            int need = rx_curr_offset - free_bytes;
+            LOG_ERR("Not enough room in RX buffer, free: %d, need %d bytes.", free_bytes, need);
         }
 
         /* reset vars */
