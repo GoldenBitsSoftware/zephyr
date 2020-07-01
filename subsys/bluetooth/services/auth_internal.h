@@ -130,40 +130,6 @@ int auth_svc_peripheral_recv_timeout(struct authenticate_conn *auth_conn, unsign
 
 
 /**
- * Initialize authentication L2CAP layer.
- *
- * @param auth_conn  Pointer to Authentication connection struct.
- *
- * @return  0 on success else negative error value including one of AUTH_ERROR_* values.
- */
-int auth_svc_l2cap_init(struct authenticate_conn *auth_conn);
-
-
-#if defined(CONFIG_BT_GATT_CLIENT)
-/**
- * Initiates a L2CAP channel connection with peripheral. Only used by client.
- *
- * @param auth_conn Pointer to Authentication connection struct.
- *
- * @return  0 on success else negative error value including one of AUTH_ERROR_* values.
- */
-int auth_svc_l2cap_connect( struct authenticate_conn *auth_conn);
-
-#else
-
-/**
- * Used by peripheral to register to accept L2CAP channel from a central.
- *
- * @param auth_conn Pointer to Authentication connection struct.
- *
- * @return  0 on success else negative error value including one of AUTH_ERROR_* values.
- */
-int auth_svc_l2cap_register(struct authenticate_conn *auth_conn);
-
-#endif
-
-
-/**
  * Routines to read/write over L2CAP
  */
 

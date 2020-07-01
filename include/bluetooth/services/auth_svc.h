@@ -53,7 +53,7 @@ extern "C" {
 #define AUTH_CONN_CENTRAL                   0x0002
 #define AUTH_CONN_DTLS_AUTH_METHOD          0x0004
 #define AUTH_CONN_CHALLENGE_AUTH_METHOD     0x0008
-#define AUTH_CONN_USE_L2CAP                 0x0010
+
 
 /**
  * L2CAP PSM numbers
@@ -80,7 +80,7 @@ extern "C" {
  } auth_status_t;
 
 
-#define AUTH_SVC_IOBUF_LEN      (2048u)
+#define AUTH_SVC_IOBUF_LEN      (4096u)
 
  /**
   * @brief Circular buffer used to save received data.
@@ -161,11 +161,6 @@ struct authenticate_conn
 {
     struct bt_conn *conn;
 
-    /**
-     * True if using GATT to authenticate, else using L2CAP
-     */
-    bool use_gatt_attributes;
-
     bool is_central;  /* True if connection is for central role */
 
     /* current status of the authentication process */
@@ -206,17 +201,11 @@ struct authenticate_conn
     const struct bt_gatt_attr *auth_client_attr; /* Client attribute */
     const struct bt_gatt_attr *auth_server_attr; /* Server attribute */
 
-    /* BLE L2CAP channel, used by server and client */
-    struct bt_l2cap_le_chan l2cap_channel;
 
 #if defined(CONFIG_BT_GATT_CLIENT)
     /* Timer when connecting L2CAP channel. If channel not connected by
      * N number of seconds, then timeout error status is returned */
     struct k_timer chan_connect_timer;
-#else
-
-    /* used by server to wait for channel connection */
-    struct bt_l2cap_server l2cap_server;
 #endif
 
     /* IO buffer used by the Central and Peripheral */

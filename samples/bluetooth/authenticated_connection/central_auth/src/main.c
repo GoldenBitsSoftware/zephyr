@@ -303,20 +303,6 @@ static void connected(struct bt_conn *conn, u8_t conn_err)
         bt_conn_set_context(conn, &central_auth_conn);
 
 
-        /* If connecting via L2CAP, no need to discover attibutes
-        * just connect via L2CAP layer */
-        if(!central_auth_conn.use_gatt_attributes) {
-
-            // start authentication service
-            err = auth_svc_start(&central_auth_conn);
-
-            if(err) {
-                LOG_ERR("Failed to start L2CAP authentication, error: %d", err);
-            }
-
-            return;
-        }
-
         /* set the max MTU, only for GATT interface */
         mtu_parms.func = mtu_change_cb;
         bt_gatt_exchange_mtu(conn, &mtu_parms);

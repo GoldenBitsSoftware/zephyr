@@ -142,7 +142,6 @@ int auth_svc_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_f
 #endif
 
 
-
     /* init mutexes */
     k_sem_init(&auth_conn->auth_indicate_sem, 0, 1);
     k_sem_init(&auth_conn->auth_central_write_sem, 0, 1);
@@ -155,20 +154,6 @@ int auth_svc_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_f
     k_work_init(&auth_conn->auth_status_work, auth_svc_status_work);
 
     auth_conn->is_central = (auth_flags & AUTH_CONN_CENTRAL) ? true : false;
-
-    if(auth_flags & AUTH_CONN_USE_L2CAP) {
-        auth_conn->use_gatt_attributes = false;
-
-        /* init auth L2CAP layer */
-        err = auth_svc_l2cap_init(auth_conn);
-
-        if(err) {
-            LOG_ERR("Failed to initialize authentication service over L2CAP, err: %d", err);
-            return err;
-        }
-    } else {
-        auth_conn->use_gatt_attributes = true;
-    }
 
     /* Initialize RX buffer */
     auth_svc_buffer_init(&auth_conn->rx_buf);
@@ -204,27 +189,9 @@ int auth_svc_start(struct authenticate_conn *auth_conn)
 {
     int err;
 
-    /* If using L2CAP interface, create a channel first */
-    if(!auth_conn->use_gatt_attributes) {
-
-#if defined(CONFIG_BT_GATT_CLIENT)
-        /* after successful connection, auth thread is started */
-        err = auth_svc_l2cap_connect(auth_conn);
-#else
-        /* register a L2CAP server, and wait for channel connection */
-        err = auth_svc_l2cap_register(auth_conn);
-#endif
-
-        if(err) {
-            LOG_ERR("Failed to setup L2CAP channel, err: %d", err);
-        }
-
-        return err;
-    }
-
     /* The BLE connection should be completed, by now.  If Peripheral
      * get the BLE attributes to read/write from. */
-    if(!auth_conn->is_central && auth_conn->use_gatt_attributes) {
+    if(!auth_conn->is_central) {
         err = auth_svc_get_peripheral_attributes(auth_conn);
 
         if(err) {
@@ -328,14 +295,7 @@ void auth_svc_set_tls_certs(struct authenticate_conn *auth_conn, struct auth_cer
  */
 int auth_central_tx(struct authenticate_conn *conn, const unsigned char *data, size_t len)
 {
-    int numbytes_err = 0;  /* num bytes written if > 0, else error */
-
-    if(conn->use_gatt_attributes) {
-        numbytes_err = auth_svc_central_tx(conn, data, len);
-    } else {
-        /* use L2CAP layer */
-        numbytes_err = auth_svc_tx_l2cap(conn, data, len);
-    }
+    int numbytes_err = auth_svc_central_tx(conn, data, len);
 
     return numbytes_err;
 }
@@ -345,12 +305,7 @@ int auth_central_tx(struct authenticate_conn *conn, const unsigned char *data, s
  */
 int auth_central_rx(struct authenticate_conn *conn, uint8_t *buf, size_t rxbytes)
 {
-    int err;
-    if(conn->use_gatt_attributes) {
-        err = auth_svc_central_recv_timeout(conn, buf, rxbytes, AUTH_SVC_IO_TIMEOUT_MSEC);
-    } else {
-        err = auth_svc_recv_over_l2cap_timeout(conn, buf, rxbytes, AUTH_SVC_IO_TIMEOUT_MSEC);
-    }
+    int err = auth_svc_central_recv_timeout(conn, buf, rxbytes, AUTH_SVC_IO_TIMEOUT_MSEC);
 
     return err;
 }
@@ -361,12 +316,7 @@ int auth_central_rx(struct authenticate_conn *conn, uint8_t *buf, size_t rxbytes
  */
 int auth_periph_tx(struct authenticate_conn *conn, const unsigned char *data, size_t len)
 {
-    int err;
-    if(conn->use_gatt_attributes) {
-        err = auth_svc_peripheral_tx(conn, data, len);
-    } else {
-        err = auth_svc_tx_l2cap(conn, data, len);
-    }
+    int err = auth_svc_peripheral_tx(conn, data, len);
 
     return err;
 }
@@ -376,13 +326,7 @@ int auth_periph_tx(struct authenticate_conn *conn, const unsigned char *data, si
  */
 int auth_periph_rx(struct authenticate_conn *conn, uint8_t *buf, size_t len)
 {
-    int err;
-
-    if(conn->use_gatt_attributes) {
-        err = auth_svc_peripheral_recv_timeout(conn, buf, len, AUTH_SVC_IO_TIMEOUT_MSEC);
-    } else {
-        err = auth_svc_recv_over_l2cap_timeout(conn, buf, len, AUTH_SVC_IO_TIMEOUT_MSEC);
-    }
+    int err = auth_svc_peripheral_recv_timeout(conn, buf, len, AUTH_SVC_IO_TIMEOUT_MSEC);
 
     return err;
 }
