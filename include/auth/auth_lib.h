@@ -1,21 +1,11 @@
 /**
- * @file auth_svc.h
+ * @file auth_lib.h
  *
- * @brief  BLE Authentication Service functions
+ * @brief  Authentication library functions
  */
 
-#ifndef ZEPHYR_INCLUDE_BLUETOOTH_SERVICES_AUTH_H_
-#define ZEPHYR_INCLUDE_BLUETOOTH_SERVICES_AUTH_H_
-
-/**
- * @brief  Authentication Service (AUTH_SVC)
- * @defgroup bt_gatt_auths  Authentication Service (AUTH_SVC)
- * @ingroup bluetooth
- * @{
- *
- * [Experimental] Users should note that the APIs can change
- * as a part of ongoing development.
- */
+#ifndef ZEPHYR_INCLUDE_AUTH_LIB_H_
+#define ZEPHYR_INCLUDE_AUTH_LIB_H_
 
 
 #ifdef __cplusplus
@@ -23,7 +13,7 @@ extern "C" {
 #endif
 
 /* TODO: Add to Kconfig for BLE authentication service */
-#define CONFIG_DTLS_AUTH_METHOD
+//#define CONFIG_DTLS_AUTH_METHOD
 //#define CONFIG_CHALLENGE_RESP_AUTH_METHOD
 //#define CONFIG_USE_L2CAP
 //#define CONFIG_LOOPBACK_TEST    1
@@ -33,37 +23,29 @@ extern "C" {
  */
 #define CENTRAL_RX_BUFFER_LEN               500
 
-#define BLE_LINK_HEADER_BYTES               (2u + 1u)  /**< two bytes for header, not sure about extra byte */
-
-
 #define AUTH_SUCCESS                        0
-#define AUTH_BASE_ERROR                     -200
-#define AUTH_ERROR_INVALID_PARAM            (AUTH_BASE_ERROR - 1)
-#define AUTH_ERROR_NO_MEMORY                (AUTH_BASE_ERROR - 2)
-#define AUTH_ERROR_TIMEOUT                  (AUTH_BASE_ERROR - 3)
-#define AUTH_ERROR_NO_RESOURCE              (AUTH_BASE_ERROR - 4)
-#define AUTH_ERROR_DTLS_INIT_FAILED         (AUTH_BASE_ERROR - 5)
-#define AUTH_ERROR_IOBUFF_FULL              (AUTH_BASE_ERROR - 6)
+#define AUTH_ERROR_BASE                     (-200)
+#define AUTH_ERROR_INVALID_PARAM            (AUTH_ERROR_BASE - 1)
+#define AUTH_ERROR_NO_MEMORY                (AUTH_ERROR_BASE - 2)
+#define AUTH_ERROR_TIMEOUT                  (AUTH_ERROR_BASE - 3)
+#define AUTH_ERROR_NO_RESOURCE              (AUTH_ERROR_BASE - 4)
+#define AUTH_ERROR_DTLS_INIT_FAILED         (AUTH_ERROR_BASE - 5)
+#define AUTH_ERROR_IOBUFF_FULL              (AUTH_ERROR_BASE - 6)
+#define AUTH_ERROR_INTERNAL                 (AUTH_ERROR_BASE - 7)
 
 
 /**
  * Flags used when initializing authentication connection
  */
-#define AUTH_CONN_PERIPHERAL                0x0001
-#define AUTH_CONN_CENTRAL                   0x0002
+#define AUTH_CONN_SERVER                    0x0001
+#define AUTH_CONN_CLIENT                    0x0002
 #define AUTH_CONN_DTLS_AUTH_METHOD          0x0004
 #define AUTH_CONN_CHALLENGE_AUTH_METHOD     0x0008
 
 
-/**
- * L2CAP PSM numbers
- * 0x01 - 0x3F are reseved
- *
- */
-#define AUTH_L2CAP_CHANNEL_PSM              0x85  /* hopefully doesn't conflict w/anything */
 
-/* Log module for the BLE authentication service. */
-#define AUTH_SERVICE_LOG_MODULE             auth_svc
+/* Log module for the authentication library. */
+#define AUTH_LIB_LOG_MODULE             auth_lib
 
 
 /**
@@ -80,21 +62,6 @@ extern "C" {
  } auth_status_t;
 
 
-#define AUTH_SVC_IOBUF_LEN      (4096u)
-
- /**
-  * @brief Circular buffer used to save received data.
-  */
- struct auth_io_buffer {
-    struct k_mutex buf_mutex;
-    struct k_sem buf_sem;
-
-    uint32_t head_index;
-    uint32_t tail_index;
-    uint32_t num_valid_bytes;
-
-    uint8_t io_buffer[AUTH_SVC_IOBUF_LEN];
- };
 
 
  /**
@@ -161,7 +128,7 @@ struct authenticate_conn
 {
     struct bt_conn *conn;
 
-    bool is_central;  /* True if connection is for central role */
+    bool is_client;  /* True if client */
 
     /* current status of the authentication process */
     auth_status_t curr_status;
@@ -181,6 +148,7 @@ struct authenticate_conn
     /* authentication thread for this connection */
     k_thread_entry_t auth_thread_func;
 
+#if 0
     /* Semaphore used when waiting for write (for central) to complete */
     struct k_sem auth_central_write_sem;
 
@@ -189,6 +157,7 @@ struct authenticate_conn
     uint32_t indicate_err;
 
     volatile u8_t write_att_err;
+
 
     /* Server characteristic handle, used by the Central to send
      * authentication messages to the Peripheral */
@@ -200,13 +169,8 @@ struct authenticate_conn
     const struct bt_gatt_attr *auth_svc_attr;    /* service attribute */
     const struct bt_gatt_attr *auth_client_attr; /* Client attribute */
     const struct bt_gatt_attr *auth_server_attr; /* Server attribute */
-
-
-#if defined(CONFIG_BT_GATT_CLIENT)
-    /* Timer when connecting L2CAP channel. If channel not connected by
-     * N number of seconds, then timeout error status is returned */
-    struct k_timer chan_connect_timer;
 #endif
+
 
     /* IO buffer used by the Central and Peripheral */
     struct auth_io_buffer rx_buf;
@@ -214,7 +178,7 @@ struct authenticate_conn
     /* Pointer to internal details, do not touch!!! */
     void *internal_obj;
 
-#if defined(CONFIG_DTLS_AUTH_METHOD)
+#if defined(CONFIG_AUTH_DTLS)
     /* @brief Struct used to keep/point to all of the certs needed
      * by the BLE device. */
     struct auth_cert_container *cert_cont;
@@ -246,7 +210,7 @@ int auth_svc_init(struct authenticate_conn *auth_conn,
  */
 int auth_svc_deinit(struct authenticate_conn *auth_conn);
 
-#if defined(CONFIG_DTLS_AUTH_METHOD)
+#if defined(CONFIG_AUTH_DTLS)
 /**
  * For TLS/DLTS authentication sets the necessary certificates.  All certs should be
  * in PEM format.  The point should be valid during runtime.
@@ -326,7 +290,5 @@ u8_t auth_svc_gatt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe
 }
 #endif
 
-/**
- * @}
- */
-#endif /* ZEPHYR_INCLUDE_BLUETOOTH_SERVICES_AUTH_H_ */
+
+#endif /* ZEPHYR_INCLUDE_AUTH_LIB_H_ */

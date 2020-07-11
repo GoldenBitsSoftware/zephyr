@@ -18,16 +18,20 @@
 
 #include <net/tls_credentials.h>
 
+#if 0
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/hci.h>
 #include <bluetooth/conn.h>
 #include <bluetooth/uuid.h>
 #include <bluetooth/gatt.h>
 #include <bluetooth/l2cap.h>
+#endif
+
 #include <logging/log.h>
 #include <logging/log_ctrl.h>
 
-#include <bluetooth/services/auth_svc.h>
+//#include <bluetooth/services/auth_svc.h>
+#include <auth/auth_lib.h>
 
 #if defined(CONFIG_DTLS_AUTH_METHOD)
 #include "../cert_chain/ble_auth_all_certs/bleauth_ca_chain.h"
@@ -153,7 +157,7 @@ void mtu_change_cb(struct bt_conn *conn, u8_t err, struct bt_gatt_exchange_param
     } else {
         struct authenticate_conn *auth_conn = (struct authenticate_conn *)bt_con_get_context(conn);
 
-        auth_conn->payload_size = bt_gatt_get_mtu(conn) - BLE_LINK_HEADER_BYTES;
+        //auth_conn->payload_size = bt_gatt_get_mtu(conn) - BLE_LINK_HEADER_BYTES;
 
         LOG_DBG("Successfuly set MTU to: %d", bt_gatt_get_mtu(conn));
         LOG_DBG("Payload size is: %d", auth_conn->payload_size );
@@ -224,18 +228,20 @@ static u8_t discover_func(struct bt_conn *conn,
         LOG_INF("Discover complete");
 
         /* save off the server attribute handle */
+
+        //NOTE:  Don't embedded auth_conn into ble context, use lookup method which
+        //       maps BLE connection w/auth_conn.
         struct authenticate_conn *auth_conn = (struct authenticate_conn*)bt_con_get_context(conn);
 
-        if(auth_conn != NULL) {
-            auth_conn->server_char_handle = auth_svc_gatt_tbl[AUTH_SVC_SERVER_CHAR_INDEX].value_handle;
-        } else {
+        if(auth_conn == NULL) {
             LOG_ERR("Failed to get connection context.");
+            return BT_GATT_ITER_STOP;
         }
 
         /* setup the subscribe params
           Value handle for the Client characteristic for indication of
           peripheral data. */
-        subscribe_params.notify = auth_svc_gatt_central_notify;
+        subscribe_params.notify = auth_xp_bt_central_notify;
         subscribe_params.value = BT_GATT_CCC_NOTIFY;
         subscribe_params.value_handle = auth_svc_gatt_tbl[AUTH_SVC_CLIENT_CHAR_INDEX].value_handle;
 
@@ -245,6 +251,19 @@ static u8_t discover_func(struct bt_conn *conn,
         err = bt_gatt_subscribe(conn, &subscribe_params);
         if (err && err != -EALREADY) {
             LOG_ERR("Subscribe failed (err %d)", err);
+        }
+
+        /* Get the server BT characteristic, the central sends data to this characteristic */
+        uint16_t server_char_handle = auth_svc_gatt_tbl[AUTH_SVC_SERVER_CHAR_INDEX].value_handle;
+
+        /* setup the BT transport params */
+        struct auth_xp_bt_params xport_params = {.conn = conn, .is_central = true,
+                                                 .send_char_value_hdl = server_char_handle };
+
+        err = auth_xport_init(&auth_conn->xporthdl, 0, &xport_params);
+
+        if(err) {
+
         }
 
         /* Start auth process */
@@ -301,6 +320,8 @@ static void connected(struct bt_conn *conn, u8_t conn_err)
          * into the bt connection for later use */
         central_auth_conn.conn = conn;
         bt_conn_set_context(conn, &central_auth_conn);
+
+
 
 
         /* set the max MTU, only for GATT interface */
@@ -532,36 +553,32 @@ void main(void)
 
     log_init();
 
-    LOG_INF("Central Auth started.");
+    LOG_INF("Client Auth started.");
 
 
-    uint32_t flags = AUTH_CONN_CENTRAL;
+    uint32_t flags = AUTH_CONN_CLIENT;
 
-#if defined(CONFIG_DTLS_AUTH_METHOD) && defined(CONFIG_CHALLENGE_RESP_AUTH_METHOD)
+#if defined(CONFIG_AUTH_DTLS) && defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
 #error Invalid authenticaiton config, either DTLS or Challenge-Response, not both.
 #endif
 
-#if defined(CONFIG_DTLS_AUTH_METHOD)
+#if defined(CONFIG_AUTH_DTLS)
      flags |= AUTH_CONN_DTLS_AUTH_METHOD;
 #endif
 
-#if defined(CONFIG_CHALLENGE_RESP_AUTH_METHOD)
+#if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
      flags |= AUTH_CONN_CHALLENGE_AUTH_METHOD;
 #endif
 
-#if defined(CONFIG_USE_L2CAP)
-    flags |= AUTH_CONN_USE_L2CAP;
-#endif
 
-
-#if defined(CONFIG_DTLS_AUTH_METHOD)
+#if defined(CONFIG_AUTH_DTLS)
     /**
     * Add certificates to authentication instance.
     */
     auth_svc_set_tls_certs(&central_auth_conn, &certs);
 #endif
 
-    err = auth_svc_init(&central_auth_conn, auth_status, NULL, flags);
+    err = auth_init(&central_auth_conn, auth_status, NULL, flags);
 
     if(err) {
         LOG_ERR("Failed to init authentication service, err: %d.", err);
@@ -571,7 +588,7 @@ void main(void)
     /**
      * @brief Enable the Bluetooth module.  Passing NULL to bt_enable
      * will block while the BLE stack is initialized.
-     * nable bluetooth module
+     * Enable bluetooth module
      */
     err = bt_enable(NULL);
     if (err) {

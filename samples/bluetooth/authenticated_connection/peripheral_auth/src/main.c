@@ -25,13 +25,45 @@
 
 #include <bluetooth/services/auth_svc.h>
 
-#if defined(CONFIG_DTLS_AUTH_METHOD)
+#if defined(CONFIG_AUTH_DTLS)
 #include "../cert_chain/ble_auth_all_certs/bleauth_ca_chain.h"
 #include "../cert_chain/ble_auth_all_certs/bleauth_central_cert.h"
 #include "../cert_chain/ble_auth_all_certs/bleauth_peripheral_cert.h"
 #include "../cert_chain/ble_auth_all_certs/bleauth_peripheral_key.h"
 #include "../cert_chain/ble_auth_all_certs/bleauth_central_key.h"
 #endif
+
+static auth_xport_hdl_t xpt_hdl;
+
+
+/* AUTH Service Declaration */
+BT_GATT_SERVICE_DEFINE(auth_svc,
+    BT_GATT_PRIMARY_SERVICE(BT_UUID_AUTH_SVC),
+
+    /**
+     *    Central (client role) bt_gatt_write()  ---> server characteristic --> bt_gatt_read() Peripheral (server role)
+     *
+     *                Central    <---  Notification (client characteristic)  <--- Peripheral
+     *
+     */
+
+    /**
+     * Client characteristic, used by the peripheral (server role) to write messages authentication messages
+     * to the central (client role).  The peripheral needs to alert the central a message is
+     * ready to be read.
+     */
+    BT_GATT_CHARACTERISTIC(BT_UUID_AUTH_SVC_CLIENT_CHAR, BT_GATT_CHRC_INDICATE,
+            (BT_GATT_PERM_READ|BT_GATT_PERM_WRITE), NULL, NULL, NULL),
+    BT_GATT_CCC(client_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+
+    /**
+     * Server characteristic, used by the central (client role) to write authentication messages to.
+     * to the server (peripheral)
+     */
+    BT_GATT_CHARACTERISTIC(BT_UUID_AUTH_SVC_SERVER_CHAR, BT_GATT_CHRC_WRITE,
+           (BT_GATT_PERM_READ|BT_GATT_PERM_WRITE), NULL, auth_xport_ble_central_write, NULL),
+);
+
 
 
 struct bt_conn *default_conn;
@@ -40,7 +72,7 @@ static bool is_connected = false;
 
 static struct authenticate_conn auth_conn;
 
-#if defined(CONFIG_DTLS_AUTH_METHOD)
+#if defined(CONFIG_AUTH_DTLS)
 
 /* The Root and Intermediate Certs, in a single chain, PEM format.*/
 static struct auth_tls_certs ca_cert_chain = {
@@ -86,17 +118,31 @@ static const struct bt_data ad[] = {
  */
 static void connected(struct bt_conn *conn, u8_t err)
 {
+    int ret;
+
     if (err) {
         printk("Connection failed (err 0x%02x)\n", err);
     } else {
         default_conn = bt_conn_ref(conn);
         printk("Connected\n");
 
-        auth_conn.conn = default_conn;
+        //auth_conn.conn = default_conn;
 
-        bt_conn_set_context(conn, &auth_conn);
+
+        struct auth_xp_bt_params xport_param = { .conn = conn, .is_central = false,
+                                                 .client_attr = &auth_svc.attrs[1] };
+
+        ret = auth_xport_init(&xpt_hdl, 0, &xport_param);
+
+        if(ret) {
+            printk("Failed to initialize BT transport, err: %d", ret);
+            return;
+        }
 
         is_connected = true;
+
+        /* send connection event to BT transport */
+        auth_xport_event(xpt_hdl, struct auth_xport_evt *event);
 
         /* Start authentication */
         int ret = auth_svc_start(&auth_conn);
@@ -112,6 +158,13 @@ static void disconnected(struct bt_conn *conn, u8_t reason)
     printk("Disconnected (reason 0x%02x)\n", reason);
 
     is_connected = false;
+
+    /* Send disconnect event to BT transport. */
+    auth_xport_event(xpt_hdl, struct auth_xport_evt *event);
+
+    /* Deinit lower transport */
+    auth_xport_deinit(xpt_hdl);
+    xpt_hdl = NULL;
 
     if (default_conn) {
         bt_conn_unref(default_conn);
@@ -190,7 +243,7 @@ void main(void)
     uint32_t auth_flags = AUTH_CONN_PERIPHERAL;
 
 
-#if defined(CONFIG_DTLS_AUTH_METHOD)
+#if defined(CONFIG_AUTH_DTLS)
     auth_flags |= AUTH_CONN_DTLS_AUTH_METHOD;
 
     /**
@@ -199,13 +252,10 @@ void main(void)
     auth_svc_set_tls_certs(&auth_conn, &peripheral_certs);
 #endif
 
-#if defined(CONFIG_CHALLENGE_RESP_AUTH_METHOD)
+#if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
     auth_flags |= AUTH_CONN_CHALLENGE_AUTH_METHOD;
 #endif
 
-#if defined(CONFIG_USE_L2CAP)
-    auth_flags |= AUTH_CONN_USE_L2CAP;
-#endif
 
     int err = auth_svc_init(&auth_conn, auth_status, NULL, auth_flags);
 
@@ -235,3 +285,4 @@ void main(void)
         k_yield();
     }
 }
+

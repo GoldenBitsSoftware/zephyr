@@ -17,4 +17,6 @@ source "lib/posix/Kconfig"
 
 source "lib/updatehub/Kconfig"
 
+source "lib/auth/Kconfig"
+
 endmenu
