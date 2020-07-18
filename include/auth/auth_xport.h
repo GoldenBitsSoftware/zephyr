@@ -244,6 +244,15 @@ u8_t auth_xp_bt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_pa
  */
 int auth_xp_bt_event(const auth_xport_hdl_t xporthdl, struct auth_xport_evt *event);
 
+/**
+ * Gets the lower transport MTU.
+ *
+ * @param xporthdl   Transport handle.
+ *
+ * @return The mtu size in bytes.
+ */
+int auth_xp_bt_get_mtu(const auth_xport_hdl_t xporthdl);
+
 #endif
 
 #ifdef CONFIG_SERIAL_XPORT
