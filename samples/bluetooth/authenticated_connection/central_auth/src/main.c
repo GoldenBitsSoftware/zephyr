@@ -18,20 +18,17 @@
 
 #include <net/tls_credentials.h>
 
-#if 0
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/hci.h>
 #include <bluetooth/conn.h>
 #include <bluetooth/uuid.h>
 #include <bluetooth/gatt.h>
-#include <bluetooth/l2cap.h>
-#endif
 
+#include <auth/auth_lib.h>
 #include <logging/log.h>
 #include <logging/log_ctrl.h>
 
-//#include <bluetooth/services/auth_svc.h>
-#include <auth/auth_lib.h>
+
 
 #if defined(CONFIG_DTLS_AUTH_METHOD)
 #include "../cert_chain/ble_auth_all_certs/bleauth_ca_chain.h"
@@ -80,7 +77,7 @@ static struct gpio_callback gpio_cb;
  * Authentication connect struct
  */
 static struct authenticate_conn central_auth_conn;
-//struct auth_connection_params conn_params;
+
 
 
 /* Auth service, client descriptor, server descriptor */
@@ -116,7 +113,6 @@ static auth_svc_gatt_t auth_svc_gatt_tbl[AUTH_SVC_GATT_COUNT] = {
  };
 
 #if defined(CONFIG_DTLS_AUTH_METHOD)
-
 /* The Root and Intermediate Certs, in a single chain, PEM format.*/
 static struct auth_tls_certs ca_cert_chain = {
     .cert_type = AUTH_CERT_CA_CHAIN,
@@ -155,12 +151,10 @@ void mtu_change_cb(struct bt_conn *conn, u8_t err, struct bt_gatt_exchange_param
     if(err) {
         LOG_ERR("Failed to set MTU, err: %d", err);
     } else {
-        struct authenticate_conn *auth_conn = (struct authenticate_conn *)bt_con_get_context(conn);
-
         //auth_conn->payload_size = bt_gatt_get_mtu(conn) - BLE_LINK_HEADER_BYTES;
 
         LOG_DBG("Successfuly set MTU to: %d", bt_gatt_get_mtu(conn));
-        LOG_DBG("Payload size is: %d", auth_conn->payload_size );
+        //LOG_DBG("Payload size is: %d", auth_conn->payload_size );
     }
 }
 
@@ -229,14 +223,6 @@ static u8_t discover_func(struct bt_conn *conn,
 
         /* save off the server attribute handle */
 
-        //NOTE:  Don't embedded auth_conn into ble context, use lookup method which
-        //       maps BLE connection w/auth_conn.
-        struct authenticate_conn *auth_conn = (struct authenticate_conn*)bt_con_get_context(conn);
-
-        if(auth_conn == NULL) {
-            LOG_ERR("Failed to get connection context.");
-            return BT_GATT_ITER_STOP;
-        }
 
         /* setup the subscribe params
           Value handle for the Client characteristic for indication of
@@ -258,16 +244,17 @@ static u8_t discover_func(struct bt_conn *conn,
 
         /* setup the BT transport params */
         struct auth_xp_bt_params xport_params = {.conn = conn, .is_central = true,
-                                                 .send_char_value_hdl = server_char_handle };
+                                                 .server_char_hdl = server_char_handle };
 
-        err = auth_xport_init(&auth_conn->xporthdl, 0, &xport_params);
+        err = auth_xport_init(&central_auth_conn.xport_hdl, 0, &xport_params);
 
         if(err) {
-
+            LOG_ERR("Failed to initialize Bluetooth transport, err: %d", err);
+            return BT_GATT_ITER_STOP;
         }
 
         /* Start auth process */
-        err = auth_svc_start(auth_conn);
+        err = auth_lib_start(&central_auth_conn);
         if(err) {
             LOG_ERR("Failed to start auth service, err: %d", err);
         } else {
@@ -316,13 +303,8 @@ static void connected(struct bt_conn *conn, u8_t conn_err)
 
     if (conn == default_conn) {
 
-        /* Save off the bt connection, also set the auth context
-         * into the bt connection for later use */
+        /* Save off the bt connection */
         central_auth_conn.conn = conn;
-        bt_conn_set_context(conn, &central_auth_conn);
-
-
-
 
         /* set the max MTU, only for GATT interface */
         mtu_parms.func = mtu_change_cb;
@@ -398,10 +380,7 @@ static bool bt_adv_data_found(struct bt_data *data, void *user_data)
                 /**
                  * @brief  Connect to the device, NOTE
                  */
-                default_conn = bt_conn_create_le(addr,
-                                                 BT_LE_CONN_PARAM_DEFAULT);
-
-
+                default_conn = bt_conn_create_le(addr, BT_LE_CONN_PARAM_DEFAULT);
                 return false;
             }
     }
@@ -435,7 +414,6 @@ static void device_found(const bt_addr_le_t *addr, s8_t rssi, u8_t type,
 static void disconnected(struct bt_conn *conn, u8_t reason)
 {
     char addr[BT_ADDR_LE_STR_LEN];
-    //int err;
 
     bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
@@ -445,8 +423,18 @@ static void disconnected(struct bt_conn *conn, u8_t reason)
         return;
     }
 
+    /* de init transport */
+    /* Send disconnect event to BT transport. */
+    struct auth_xport_evt conn_evt = {.event = XP_EVT_DISCONNECT };
+    auth_xport_event(central_auth_conn.xport_hdl, &conn_evt);
+
+    /* Deinit lower transport */
+    auth_xport_deinit(central_auth_conn.xport_hdl);
+    central_auth_conn.xport_hdl = NULL;
+
     bt_conn_unref(default_conn);
     default_conn = NULL;
+    central_auth_conn.conn = NULL;
 }
 
 /**
@@ -521,10 +509,10 @@ static int init_button(void)
 }
 
 
-static void auth_status(struct authenticate_conn *auth_conn, auth_status_t status, void *context)
+static void auth_status(struct authenticate_conn *auth_conn, enum auth_status status, void *context)
 {
     /* display status */
-    printk("Authentication process status: %s\n", auth_svc_getstatus_str(status));
+    printk("Authentication process status: %s\n", auth_lib_getstatus_str(status));
 }
 
 static void process_log_msgs(void)
@@ -578,7 +566,7 @@ void main(void)
     auth_svc_set_tls_certs(&central_auth_conn, &certs);
 #endif
 
-    err = auth_init(&central_auth_conn, auth_status, NULL, flags);
+    err = auth_lib_init(&central_auth_conn, auth_status, NULL, flags);
 
     if(err) {
         LOG_ERR("Failed to init authentication service, err: %d.", err);

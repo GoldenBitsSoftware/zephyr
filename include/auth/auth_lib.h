@@ -12,6 +12,8 @@
 extern "C" {
 #endif
 
+#include <auth/auth_xport.h>
+
 /* TODO: Add to Kconfig for BLE authentication service */
 //#define CONFIG_DTLS_AUTH_METHOD
 //#define CONFIG_CHALLENGE_RESP_AUTH_METHOD
@@ -32,6 +34,8 @@ extern "C" {
 #define AUTH_ERROR_DTLS_INIT_FAILED         (AUTH_ERROR_BASE - 5)
 #define AUTH_ERROR_IOBUFF_FULL              (AUTH_ERROR_BASE - 6)
 #define AUTH_ERROR_INTERNAL                 (AUTH_ERROR_BASE - 7)
+#define AUTH_ERROR_XPORT_SEND               (AUTH_ERROR_BASE - 8)
+#define AUTH_ERROR_XPORT_FRAME              (AUTH_ERROR_BASE - 9)
 
 
 /**
@@ -51,7 +55,7 @@ extern "C" {
 /**
  *  Authentication status enums
  */
- typedef enum  {
+enum auth_status {
      AUTH_STATUS_STARTED,
      AUTH_STATUS_IN_PROCESS,
      AUTH_STATUS_CANCEL_PENDING,   /* Authentication is stopping */
@@ -59,12 +63,11 @@ extern "C" {
      AUTH_STATUS_FAILED,      /* an internal failure of some type */
      AUTH_STATUS_AUTHENTICATION_FAILED,
      AUTH_STATUS_SUCCESSFUL
- } auth_status_t;
+ };
 
 
 
-
- /**
+/**
   * Enums of cert types.
   */
 typedef enum
@@ -116,7 +119,8 @@ struct authenticate_conn;
  /**
   * Authentication callback status function
   */
-typedef void (*auth_status_cb_t)(struct authenticate_conn *auth_conn, auth_status_t status, void *context);
+typedef void (*auth_status_cb_t)(struct authenticate_conn *auth_conn, enum auth_status status, void *context);
+
 
 
 /**
@@ -130,8 +134,11 @@ struct authenticate_conn
 
     bool is_client;  /* True if client */
 
+    /* lower transport opaque handle */
+    auth_xport_hdl_t xport_hdl;
+
     /* current status of the authentication process */
-    auth_status_t curr_status;
+    enum auth_status curr_status;
 
     /* status callback func */
     auth_status_cb_t status_cb;
@@ -141,7 +148,7 @@ struct authenticate_conn
      * status changes/fails in an ISR context */
     struct k_work auth_status_work;
 
-    // thread stuff'
+    // thread stuff
     k_tid_t auth_tid;  // handshake thread id
     struct k_thread auth_thrd_data;
 
@@ -169,11 +176,12 @@ struct authenticate_conn
     const struct bt_gatt_attr *auth_svc_attr;    /* service attribute */
     const struct bt_gatt_attr *auth_client_attr; /* Client attribute */
     const struct bt_gatt_attr *auth_server_attr; /* Server attribute */
-#endif
 
 
     /* IO buffer used by the Central and Peripheral */
     struct auth_io_buffer rx_buf;
+#endif
+
 
     /* Pointer to internal details, do not touch!!! */
     void *internal_obj;
@@ -188,17 +196,16 @@ struct authenticate_conn
 
 
 /**
- *  Initializes authentication service.
+ *  Initializes authentication library
  *
  * @param auth_conn     Authentication connection struct, initialized by this call.
- * @param con_params   (DROP THIS?) Optional connection params.
  * @param status_func  Status function callback.
- * @param context      Optional context used in status calllback.
+ * @param context      Optional context used in status callback.
  * @param auth_flags   Authentication flags.
  *
  * @return 0 on success else one of AUTH_ERROR_* values.
  */
-int auth_svc_init(struct authenticate_conn *auth_conn,
+int auth_lib_init(struct authenticate_conn *auth_conn,
                   auth_status_cb_t status_func, void *context, uint32_t auth_flags);
 
 /**
@@ -208,7 +215,7 @@ int auth_svc_init(struct authenticate_conn *auth_conn,
  *
  * @return  0 on success else one of AUTH_ERROR_* values.
  */
-int auth_svc_deinit(struct authenticate_conn *auth_conn);
+int auth_lib_deinit(struct authenticate_conn *auth_conn);
 
 #if defined(CONFIG_AUTH_DTLS)
 /**
@@ -229,7 +236,7 @@ void auth_svc_set_tls_certs(struct authenticate_conn *auth_conn, struct auth_cer
  *
  * @return  0 on success else one of AUTH_ERROR_* values.
  */
-int auth_svc_start(struct authenticate_conn *auth_conn);
+int auth_lib_start(struct authenticate_conn *auth_conn);
 
 /**
  * Returns the current status of the authentication process.
@@ -238,7 +245,7 @@ int auth_svc_start(struct authenticate_conn *auth_conn);
  *
  * @return One of AUTH_STATUS_*
  */
-auth_status_t auth_svc_get_status(struct authenticate_conn *auth_conn);
+enum auth_status auth_lib_get_status(struct authenticate_conn *auth_conn);
 
 
 /**
@@ -248,7 +255,7 @@ auth_status_t auth_svc_get_status(struct authenticate_conn *auth_conn);
  * @param auth_conn   Authentication connection struct.
  * @param status      Authentication status.
  */
-void auth_svc_set_status(struct authenticate_conn *auth_conn, auth_status_t status);
+void auth_svc_lib_status(struct authenticate_conn *auth_conn, enum auth_status status);
 
 /**
  * Cancels the authentication process.  Must wait until the AUTH_STATUS_CANCELED
@@ -258,7 +265,7 @@ void auth_svc_set_status(struct authenticate_conn *auth_conn, auth_status_t stat
  *
  * @return One of AUTH_STATUS_*
  */
-int auth_svc_cancel(struct authenticate_conn *auth_conn);
+int auth_lib_cancel(struct authenticate_conn *auth_conn);
 
 /**
  * Helper routine to return string corresponding to status
@@ -267,24 +274,10 @@ int auth_svc_cancel(struct authenticate_conn *auth_conn);
  *
  * @return  Pointer to string representing the status.
  */
-const char *auth_svc_getstatus_str(auth_status_t status);
+const char *auth_lib_getstatus_str(enum auth_status status);
 
 
-
-/**  Called when central receives data from the peripheral.  Callback function set in
- * bt_gatt_subscribe_parsm structure when calling bt_gatt_subscribe()
- *
- * @param conn      BLE connection struct.
- * @param params    GATT subscription params.
- * @param data      Pointer to data bytes received from the Peripheral.
- * @param length    Number of bytes received
- *
- * @return  BT_GATT_ITER_STOP to unsubscribe from peripheral Notifications/Indications.
- *          BT_GATT_ITER_CONTINUE  to continue receiving Notifications/Indications.
- */
-u8_t auth_svc_gatt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
-                                  const void *data, u16_t length);
-
+void auth_lib_set_status(struct authenticate_conn *auth_conn, enum auth_status status);
 
 #ifdef __cplusplus
 }

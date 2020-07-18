@@ -37,5 +37,15 @@ if AUTH_LIB
           3 INFO, write LOG_INF in addition to previous levels
           4 DEBUG, write LOG_DBG in addition to previous levels
 
+    config BT_XPORT
+		bool "Bluetooth Transport"
+		help
+		If using Bluetooth to authenticate peer.
+
+    config CONFIG_SERIAL_XPORT
+		bool "Serial Transport"
+		help
+		If using serial port to authenticate peer.
+
 endif
 

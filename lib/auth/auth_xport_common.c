@@ -11,11 +11,15 @@
 #include <zephyr.h>
 #include <init.h>
 
-#include "auth_lib.h"
-#include "auth_xport.h"
+#define LOG_LEVEL CONFIG_AUTH_LOG_LEVEL
+#include <logging/log.h>
+LOG_MODULE_DECLARE(AUTH_LIB_LOG_MODULE, CONFIG_AUTH_LOG_LEVEL);
+
+#include <auth/auth_lib.h>
+#include <auth/auth_xport.h>
 
 
-#define AUTH_SVC_IOBUF_LEN      (4096u)
+#define XPORT_IOBUF_LEN      (4096u)
 
 /**
  * @brief Circular buffer used to save received data.
@@ -28,8 +32,25 @@ struct auth_xport_io_buffer {
     uint32_t tail_index;
     uint32_t num_valid_bytes;
 
-    uint8_t io_buffer[AUTH_SVC_IOBUF_LEN];
+    uint8_t io_buffer[XPORT_IOBUF_LEN];
 };
+
+
+#define XPORT_FRAME_SIZE          256u  /* should be at least as large as the MTU */
+
+#define XPORT_FRAME_SYNC_BITS     0xA590
+#define XPORT_FRAME_SYNC_MASK     0xFFF0
+#define XPORT_FRAME_BEGIN         0x01
+#define XPORT_FRAME_NEXT          0x02
+#define XPORT_FRAME_END           0x04
+
+#pragma pack(push, 1)
+struct auth_xport_frame {
+    /* bits 15-4  are for frame sync, bits 3-0 are flags */
+    uint16_t frame_hdr;  /// bytes to insure we're at a frame
+    uint8_t frame_payload[XPORT_FRAME_SIZE];
+};
+#pragma pack(pop)
 
 
 // ---------------- API ---------------------
@@ -42,6 +63,12 @@ struct auth_xport_instance
 
     /* If the lower transport has a send function */
     send_xport_t send_func;
+
+    /* vars used for re-assembling frames into a packet */
+    uint8_t rx_buf[600];  // TODO:  Make 600 this a CONFIG_ param
+    uint32_t rx_curr_offset;
+    bool rx_first_frame;
+    uint32_t payload_size;  // TODO, need to set/check how used.
 
 };
 
@@ -68,14 +95,29 @@ static int auth_xport_iobuffer_init(struct auth_xport_io_buffer *iobuf)
     return AUTH_SUCCESS;
 }
 
+/**
+ * Reset queue counters
+ *
+ * @param iobuf
+ * @return
+ */
+static int auth_xport_iobuffer_reset(struct auth_xport_io_buffer *iobuf)
+{
+    iobuf->head_index = 0;
+    iobuf->tail_index = 0;
+    iobuf->num_valid_bytes = 0;
+
+    return AUTH_SUCCESS;
+}
+
 
 /**
  * @see auth_internal.h
  */
-static int auth_xport_buffer_put(struct auth_io_buffer *iobuf, const uint8_t *in_buf, size_t num_bytes)
+static int auth_xport_buffer_put(struct auth_xport_io_buffer *iobuf, const uint8_t *in_buf, size_t num_bytes)
 {
     // Is the buffer full?
-    if(iobuf->num_valid_bytes == AUTH_SVC_IOBUF_LEN) {
+    if(iobuf->num_valid_bytes == XPORT_IOBUF_LEN) {
         return AUTH_ERROR_IOBUFF_FULL;
     }
 
@@ -91,7 +133,7 @@ static int auth_xport_buffer_put(struct auth_io_buffer *iobuf, const uint8_t *in
         return err;
     }
 
-    uint32_t free_space = AUTH_SVC_IOBUF_LEN - iobuf->num_valid_bytes;
+    uint32_t free_space = XPORT_IOBUF_LEN - iobuf->num_valid_bytes;
     uint32_t copy_cnt = MIN(free_space, num_bytes);
     uint32_t total_copied = 0;
     uint32_t byte_cnt;
@@ -111,7 +153,7 @@ static int auth_xport_buffer_put(struct auth_io_buffer *iobuf, const uint8_t *in
     } else {
 
         // copy from head to end of buffer
-        byte_cnt = AUTH_SVC_IOBUF_LEN - iobuf->head_index;
+        byte_cnt = XPORT_IOBUF_LEN - iobuf->head_index;
 
         if(byte_cnt > copy_cnt) {
             byte_cnt = copy_cnt;
@@ -147,7 +189,7 @@ static int auth_xport_buffer_put(struct auth_io_buffer *iobuf, const uint8_t *in
 
 
 
-static int auth_xport_buffer_get(struct auth_io_buffer *iobuf, uint8_t *out_buf, size_t num_bytes)
+static int auth_xport_buffer_get(struct auth_xport_io_buffer *iobuf, uint8_t *out_buf, size_t num_bytes)
 {
     // if no valid bytes, just return zero
     if(iobuf->num_valid_bytes == 0) {
@@ -166,27 +208,27 @@ static int auth_xport_buffer_get(struct auth_io_buffer *iobuf, uint8_t *out_buf,
     uint32_t byte_cnt = 0;
 
     if(iobuf->head_index <= iobuf->tail_index) {
-        // how may bytes are available
-        byte_cnt = AUTH_SVC_IOBUF_LEN - iobuf->tail_index;
+        /* How may bytes are available? */
+        byte_cnt = XPORT_IOBUF_LEN - iobuf->tail_index;
 
         if(byte_cnt > copy_cnt) {
             byte_cnt = copy_cnt;
         }
 
-        // copy from tail to end of buffer
+        /* copy from tail to end of buffer */
         memcpy(out_buf, iobuf->io_buffer + iobuf->tail_index, byte_cnt);
 
-        // update tail index
+        /* update tail index */
         iobuf->tail_index += byte_cnt;
         out_buf += byte_cnt;
         total_copied += byte_cnt;
 
-        // update copy count and num valid bytes
+        /* update copy count and num valid bytes */
         copy_cnt -= byte_cnt;
         iobuf->num_valid_bytes -= byte_cnt;
 
-        // wrapped around, copy from beginning of buffer until
-        // copy_count is satisfied
+        /* wrapped around, copy from beginning of buffer until
+           copy_count is satisfied */
         if(copy_cnt > 0) {
             memcpy(out_buf, iobuf->io_buffer, copy_cnt);
 
@@ -218,8 +260,7 @@ static int auth_xport_buffer_get(struct auth_io_buffer *iobuf, uint8_t *out_buf,
 }
 
 
-
-static int auth_xport_buffer_get_wait(struct auth_io_buffer *iobuf, uint8_t *out_buf,  int num_bytes, int waitmsec)
+static int auth_xport_buffer_get_wait(struct auth_xport_io_buffer *iobuf, uint8_t *out_buf,  int num_bytes, int waitmsec)
 {
     /* return any bytes that might be sitting in the buffer */
     int bytecount = auth_xport_buffer_get(iobuf, out_buf, num_bytes);
@@ -229,8 +270,7 @@ static int auth_xport_buffer_get_wait(struct auth_io_buffer *iobuf, uint8_t *out
         return bytecount;
     }
 
-    do
-    {
+    do {
         int err = k_sem_take(&iobuf->buf_sem, K_MSEC(waitmsec));
 
         if (err) {
@@ -246,7 +286,7 @@ static int auth_xport_buffer_get_wait(struct auth_io_buffer *iobuf, uint8_t *out
 }
 
 
-static int auth_xport_buffer_bytecount(struct auth_io_buffer *iobuf)
+static int auth_xport_buffer_bytecount(struct auth_xport_io_buffer *iobuf)
 {
     int err = k_mutex_lock(&iobuf->buf_mutex, K_FOREVER);
 
@@ -261,21 +301,53 @@ static int auth_xport_buffer_bytecount(struct auth_io_buffer *iobuf)
 }
 
 
+static int auth_xport_buffer_avail_bytes(struct auth_xport_io_buffer *iobuf)
+{
+    return sizeof(iobuf->io_buffer) - auth_xport_buffer_bytecount(iobuf);
+}
+
+/**
+ * Internal function to send data to peer
+ *
+ * @param xporthdl  Transport handle
+ * @param data      Buffer to send.
+ * @param len       Number of bytes to send.
+ *
+ * @return  Number of bytes sent on success, can be less than requested.
+ *          On error, negative error code.
+ */
+static int auth_xport_internal_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t len)
+{
+    struct auth_xport_instance *xp_inst = (struct auth_xport_instance *)xporthdl;
+
+    /* if the lower transport set a send function, call it */
+    if (xp_inst->send_func != NULL) {
+        return xp_inst->send_func(xp_inst->xport_ctx, data, len);
+    }
+
+    /* queue the send bytes into tx buffer */
+    return auth_xport_buffer_put(&xp_inst->send_buf, data, len);
+}
+
+
 /* ==================== Non static funcs ================== */
 
 /**
  * @see auth_xport.h
  */
-int auth_xport_init(auth_xport_hdl_t *xporthdl, uint32_t flags, void* xport_params);
+int auth_xport_init(auth_xport_hdl_t *xporthdl, uint32_t flags, void* xport_params)
 {
     int ret = 0;
 
+    // TODO: Need to handle multiple instances of xport
     *xporthdl = &xport_inst[0];
-
 
     /* init IO buffers */
     auth_xport_iobuffer_init(&xport_inst[0].send_buf);
     auth_xport_iobuffer_init(&xport_inst[0].recv_buf);
+
+    xport_inst[0].rx_first_frame = true;
+    xport_inst[0].rx_curr_offset = 0;
 
 #if CONFIG_BT_XPORT
     ret = auth_xp_bt_init(*xporthdl, 0, xport_params);
@@ -284,7 +356,6 @@ int auth_xport_init(auth_xport_hdl_t *xporthdl, uint32_t flags, void* xport_para
 #else
 #error No lower transport defined.
 #endif
-
 
     return ret;
 }
@@ -295,8 +366,21 @@ int auth_xport_init(auth_xport_hdl_t *xporthdl, uint32_t flags, void* xport_para
 int auth_xport_deinit(const auth_xport_hdl_t xporthdl)
 {
     int ret = 0;
-#if CONFIG_BLE_XPORT
-    ret = auth_xp_ble_deinit(xporthdl, 0);
+    struct auth_xport_instance *xp_inst = (struct auth_xport_instance *)xporthdl;
+
+    if(xp_inst == NULL) {
+        return AUTH_ERROR_INVALID_PARAM;
+    }
+
+    /* reset queues */
+    auth_xport_iobuffer_reset(&xp_inst->send_buf);
+    auth_xport_iobuffer_reset(&xp_inst->recv_buf);
+
+    xport_inst->rx_first_frame = true;
+    xport_inst->rx_curr_offset = 0;
+
+#if CONFIG_BT_XPORT
+    ret = auth_xp_bt_deinit(xporthdl);
 #elif CONFIG_SERIAL_XPORT
     ret = auth_xp_serial_deinit(xporthdl, 0);
 #else
@@ -306,46 +390,20 @@ int auth_xport_deinit(const auth_xport_hdl_t xporthdl)
     return ret;
 }
 
-
 /**
  * @see auth_xport.h
  */
-int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t len)
+int auth_xport_event(const auth_xport_hdl_t xporthdl, struct auth_xport_evt *event)
 {
-    const struct auth_xport_instance *xp_inst = (auth_xport_instance_t *)xporthdl;
+    int ret = 0;
 
-    int ret;
-    int frame_bytes;
-    int payload_bytes;
-    int send_count = 0;
-    int num_frames = 0;
-    int tx_ret;
-    struct auth_tls_frame frame;
-    const uint16_t max_frame = MIN(sizeof(frame), auth_conn->payload_size);
-    const uint16_t max_payload = max_frame - sizeof(frame.frame_hdr);
-
-    /* sanity check */
-    if(xp_inst == NULL) {
-        return AUTH_ERROR_INVALID_PARAM;
-    }
-
-    /* set frame header */
-    frame.frame_hdr = TLS_FRAME_SYNC_BITS|TLS_FRAME_BEGIN;
-
-
-
-    /* Break up data to fit into lower transport MTU */
-    while (len > 0)  {
-
-        /* if the lower transport set a send function, call it */
-        if (xp_inst->send_func != NULL)
-        {
-            return xp_inst->send_func(xp_inst->xport_ctx, data, len);
-        }
-
-        /* queue the send bytes into tx buffer */
-        ret = auth_xport_buffer_put(&xp_inst->send_buf, data, len);
-    }
+#if CONFIG_BT_XPORT
+    ret = auth_xp_bt_event(xporthdl, event);
+#elif CONFIG_SERIAL_XPORT
+    ret = auth_xp_serial_event(xporthdl, event);
+#else
+#error No lower transport defined.
+#endif
 
     return ret;
 }
@@ -353,15 +411,93 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
 /**
  * @see auth_xport.h
  */
-int auth_xport_recv(const auth_xport_hdl_t xporthdl, uint8_t *buff, uint32_t buf_len, uint32_t timeoutMsec)
+int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t len)
 {
-    const struct auth_xport_instance *xp_inst = (auth_xport_instance_t *)xporthdl;
+    struct auth_xport_instance *xp_inst = (struct auth_xport_instance *)xporthdl;
+    bool do_framing = true;  /* always true for now */
+    int frame_bytes;
+    int payload_bytes;
+    int send_count = 0;
+    int num_frames = 0;
+    int send_ret = AUTH_SUCCESS;
+    struct auth_xport_frame frame;
+    const uint16_t max_frame = MIN(sizeof(frame), xp_inst->payload_size);
+    const uint16_t max_payload = max_frame - sizeof(frame.frame_hdr);
+
+    /* sanity check */
+    if(xp_inst == NULL) {
+        return AUTH_ERROR_INVALID_PARAM;
+    }
+
+    /* if we're not framing */
+    if(!do_framing) {
+        return auth_xport_internal_send(xporthdl, data, len);
+    }
+
+    /* set frame header */
+    frame.frame_hdr = XPORT_FRAME_SYNC_BITS|XPORT_FRAME_BEGIN;
+
+    /* Break up data to fit into lower transport MTU */
+    while (len > 0 && send_ret == AUTH_SUCCESS) {
+
+        /* get payload bytes */
+        payload_bytes = MIN(max_payload, len);
+
+        frame_bytes = payload_bytes + sizeof(frame.frame_hdr);
+
+        /* is this the last frame? */
+        if((len - payload_bytes) == 0) {
+
+            frame.frame_hdr = XPORT_FRAME_SYNC_BITS|XPORT_FRAME_END;
+
+            /* now check if we're only sending one frame, then set
+             * the frame begin flag */
+            if(num_frames == 0) {
+                frame.frame_hdr |= XPORT_FRAME_BEGIN;
+            }
+        }
+
+        /* copy body */
+        memcpy(frame.frame_payload, data, payload_bytes);
+
+        /* send frame */
+        send_ret = auth_xport_internal_send(xporthdl, (const uint8_t*)&frame, frame_bytes);
+
+        if(send_ret < 0) {
+            LOG_ERR("Failed to send xport frame, error: %d", send_ret);
+            return AUTH_ERROR_XPORT_SEND;
+        }
+
+        /* verify all bytes were sent */
+        if(send_ret != frame_bytes) {
+            LOG_ERR("Failed to to send all bytes, send: %d, requested: %d", send_ret, frame_bytes);
+            return AUTH_ERROR_XPORT_SEND;
+        }
+
+        /* set next flags */
+        frame.frame_hdr = XPORT_FRAME_SYNC_BITS|XPORT_FRAME_NEXT;
+
+        len -= payload_bytes;
+        data += payload_bytes;
+        send_count += payload_bytes;
+        num_frames++;
+   }
+
+    return send_ret;
+}
+
+/**
+ * @see auth_xport.h
+ */
+int auth_xport_recv(const auth_xport_hdl_t xporthdl, uint8_t *buf, uint32_t buf_len, uint32_t timeoutMsec)
+{
+    struct auth_xport_instance *xp_inst = (struct auth_xport_instance *)xporthdl;
 
     if(xp_inst == NULL) {
         return AUTH_ERROR_INVALID_PARAM;
     }
 
-    int ret = auth_xport_buffer_get_wait(&xp_inst->recv_buf, buf, buf_len, timeoutMsecs);
+    int ret = auth_xport_buffer_get_wait(&xp_inst->recv_buf, buf, buf_len, timeoutMsec);
 
     return ret;
 }
@@ -371,13 +507,13 @@ int auth_xport_recv(const auth_xport_hdl_t xporthdl, uint8_t *buff, uint32_t buf
  */
 int auth_xport_getnum_send_queued_bytes(const auth_xport_hdl_t xporthdl)
 {
-    const struct auth_xport_instance *xp_inst = (auth_xport_instance_t *)xporthdl;
+    struct auth_xport_instance *xp_inst = (struct auth_xport_instance *)xporthdl;
 
     if(xp_inst == NULL) {
         return AUTH_ERROR_INVALID_PARAM;
     }
 
-    int numbytes = auth_xport_buffer_bytecount( &xp_inst->send_buf);
+    int numbytes = auth_xport_buffer_bytecount(&xp_inst->send_buf);
 
     return numbytes;
 }
@@ -385,24 +521,114 @@ int auth_xport_getnum_send_queued_bytes(const auth_xport_hdl_t xporthdl)
 /**
  * @see auth_xport.h
  */
-int auth_xport_put_recv_bytes(const auth_xport_hdl_t xporthdl, cosnt uint8_t *buff, size_t buflen)
+int auth_xport_put_recv_bytes(const auth_xport_hdl_t xporthdl, const uint8_t *buf, size_t buflen)
 {
-    const struct auth_xport_instance *xp_inst = (auth_xport_instance_t *)xporthdl;
+    struct auth_xport_instance *xp_inst = (struct auth_xport_instance *)xporthdl;
+    struct auth_xport_frame *rx_frame;
+    int free_buf_space;
+    int recv_ret = 0;
+    bool do_framing = true;
 
     if(xp_inst == NULL) {
         return AUTH_ERROR_INVALID_PARAM;
     }
 
-static uint8_t rx_buf[600];
-static uint32_t rx_curr_offset;
-static bool rx_first_frame = true;
-int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *buffer, size_t buflen)
-{
-}
+    /* If not framing, then just put the data into the receive buffer */
+    if(!do_framing) {
+        return auth_xport_buffer_put(&xp_inst->recv_buf, buf, buflen);
+     }
 
-    int ret = auth_xport_buffer_put(&xp_inst->recv_buf, in_buf, buflen);
+    /* Reassemble packet from frames */
+    /* read a frame from the peer */
+    rx_frame = (struct auth_xport_frame *)buf;
 
-    return ret;
+    /* check for start flag */
+    if(xp_inst->rx_first_frame) {
+
+        xp_inst->rx_first_frame = false;
+
+        if(!(rx_frame->frame_hdr & XPORT_FRAME_BEGIN)) {
+            /* reset vars */
+            xp_inst->rx_curr_offset = 0;
+            xp_inst->rx_first_frame = true;
+
+            LOG_ERR("RX-Missing beginning frame");
+            return AUTH_ERROR_XPORT_FRAME;
+        }
+
+        LOG_DBG("RX-Got BEGIN frame.");
+    }
+
+    /* check frame sync bytes */
+    if((rx_frame->frame_hdr & XPORT_FRAME_SYNC_MASK) != XPORT_FRAME_SYNC_BITS) {
+        /* reset vars */
+        xp_inst->rx_curr_offset = 0;
+        xp_inst->rx_first_frame = true;
+
+        LOG_ERR("RX-Invalid frame.");
+        return AUTH_ERROR_XPORT_FRAME;
+    }
+
+    /* Subtract out frame header */
+    buflen -= sizeof(rx_frame->frame_hdr);
+
+    /* move beyond frame header */
+    buf += sizeof(rx_frame->frame_hdr);
+
+    /* sanity check, if zero or negative */
+    if(buflen <= 0) {
+        /* reset vars */
+        xp_inst->rx_curr_offset = 0;
+        xp_inst->rx_first_frame = true;
+        LOG_ERR("RX-Empty frame!!");
+        return AUTH_ERROR_XPORT_FRAME;
+    }
+
+    /* ensure there's enough free space in our temp buffer */
+    free_buf_space = sizeof(xp_inst->rx_buf) - xp_inst->rx_curr_offset;
+
+    if(free_buf_space < buflen) {
+        /* reset vars */
+        xp_inst->rx_curr_offset = 0;
+        xp_inst->rx_first_frame = true;
+        LOG_ERR("RX-not enough free space");
+        return AUTH_ERROR_XPORT_FRAME;
+    }
+
+    /* copy payload bytes */
+    memcpy(xp_inst->rx_buf + xp_inst->rx_curr_offset, buf, buflen);
+
+    xp_inst->rx_curr_offset += buflen;
+
+    /* returned the number of bytes queued */
+    recv_ret = buflen;
+
+    /* Is this the last frame? */
+    if(rx_frame->frame_hdr & XPORT_FRAME_END) {
+
+        /* log number payload bytes received, don't include dtls header */
+        LOG_DBG("RX-Got LAST frame, total bytes: %d", xp_inst->rx_curr_offset);
+
+        int free_bytes = auth_xport_buffer_avail_bytes(&xp_inst->recv_buf);
+
+        /* Is there enough free space to write record? */
+        if(free_bytes >= xp_inst->rx_curr_offset) {
+
+            /* copy into receive buffer */
+            recv_ret = auth_xport_buffer_put(&xp_inst->recv_buf, xp_inst->rx_buf,
+                                             xp_inst->rx_curr_offset);
+
+        } else {
+            int need = xp_inst->rx_curr_offset - free_bytes;
+            LOG_ERR("Not enough room in RX buffer, free: %d, need %d bytes.", free_bytes, need);
+        }
+
+        /* reset vars */
+        xp_inst->rx_curr_offset = 0;
+        xp_inst->rx_first_frame = true;
+    }
+
+    return recv_ret;
 }
 
 /**
@@ -410,13 +636,29 @@ int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *
  */
 void auth_xport_set_sendfunc(auth_xport_hdl_t xporthdl, send_xport_t send_func)
 {
-    const struct auth_xport_instance *xp_inst = (auth_xport_instance_t *)xporthdl;
-
-    if(xp_inst == NULL) {
-        return AUTH_ERROR_INVALID_PARAM;
-    }
+    struct auth_xport_instance *xp_inst = (struct auth_xport_instance *)xporthdl;
 
     xp_inst->send_func = send_func;
+}
+
+/**
+ * @see auth_xport.h
+ */
+void auth_xport_set_context(auth_xport_hdl_t xporthdl, void *context)
+{
+    struct auth_xport_instance *xp_inst = (struct auth_xport_instance *)xporthdl;
+
+    xp_inst->xport_ctx = context;
+}
+
+/**
+ * @see auth_xport.h
+ */
+void *auth_xport_get_context(auth_xport_hdl_t xporthdl)
+{
+    struct auth_xport_instance *xp_inst = (struct auth_xport_instance *)xporthdl;
+
+    return xp_inst->xport_ctx;
 }
 
 

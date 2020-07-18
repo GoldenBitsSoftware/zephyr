@@ -36,6 +36,8 @@
 static auth_xport_hdl_t xpt_hdl;
 
 
+static void client_ccc_cfg_changed(const struct bt_gatt_attr *attr, u16_t value);
+
 /* AUTH Service Declaration */
 BT_GATT_SERVICE_DEFINE(auth_svc,
     BT_GATT_PRIMARY_SERVICE(BT_UUID_AUTH_SVC),
@@ -119,6 +121,7 @@ static const struct bt_data ad[] = {
 static void connected(struct bt_conn *conn, u8_t err)
 {
     int ret;
+    struct auth_xport_evt conn_evt;
 
     if (err) {
         printk("Connection failed (err 0x%02x)\n", err);
@@ -126,13 +129,10 @@ static void connected(struct bt_conn *conn, u8_t err)
         default_conn = bt_conn_ref(conn);
         printk("Connected\n");
 
-        //auth_conn.conn = default_conn;
-
-
         struct auth_xp_bt_params xport_param = { .conn = conn, .is_central = false,
                                                  .client_attr = &auth_svc.attrs[1] };
 
-        ret = auth_xport_init(&xpt_hdl, 0, &xport_param);
+        ret = auth_xport_init(&auth_conn.xport_hdl, 0, &xport_param);
 
         if(ret) {
             printk("Failed to initialize BT transport, err: %d", ret);
@@ -142,7 +142,8 @@ static void connected(struct bt_conn *conn, u8_t err)
         is_connected = true;
 
         /* send connection event to BT transport */
-        auth_xport_event(xpt_hdl, struct auth_xport_evt *event);
+        conn_evt.event = XP_EVT_CONNECT;
+        auth_xport_event(auth_conn.xport_hdl, &conn_evt);
 
         /* Start authentication */
         int ret = auth_svc_start(&auth_conn);
@@ -155,16 +156,19 @@ static void connected(struct bt_conn *conn, u8_t err)
 
 static void disconnected(struct bt_conn *conn, u8_t reason)
 {
+    struct auth_xport_evt conn_evt;
+
     printk("Disconnected (reason 0x%02x)\n", reason);
 
     is_connected = false;
 
     /* Send disconnect event to BT transport. */
-    auth_xport_event(xpt_hdl, struct auth_xport_evt *event);
+    conn_evt.event = XP_EVT_DISCONNECT;
+    auth_xport_event(auth_conn.xport_hdl, &conn_evt);
 
     /* Deinit lower transport */
-    auth_xport_deinit(xpt_hdl);
-    xpt_hdl = NULL;
+    auth_xport_deinit(auth_conn.xport_hdl);
+    auth_conn.xport_hdl = NULL;
 
     if (default_conn) {
         bt_conn_unref(default_conn);
@@ -227,6 +231,23 @@ static void auth_status(struct authenticate_conn *auth_conn, auth_status_t statu
     /* print out auth status */
     printk("Authentication status: %s\n", auth_svc_getstatus_str(status));
 }
+
+
+/**
+ * Called when client notification is (dis)enabled by the Central
+ *
+ * @param attr    GATT attribute.
+ * @param value   BT_GATT_CCC_NOTIFY if changes are notified.
+ */
+static void client_ccc_cfg_changed(const struct bt_gatt_attr *attr, u16_t value)
+{
+    ARG_UNUSED(attr);
+
+    bool notif_enabled = (value == BT_GATT_CCC_NOTIFY) ? true : false;
+
+    LOG_INF("Client notifications %s", notif_enabled ? "enabled" : "disabled");
+}
+
 
 static void process_log_msgs(void)
 {

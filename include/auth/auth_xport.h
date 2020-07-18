@@ -1,11 +1,15 @@
 /**
- * @file auth_internal.h
+ * @file auth_xport.h
  *
  * @brief
  */
 
 #ifndef ZEPHYR_INCLUDE_AUTH_XPORT_H_
 #define ZEPHYR_INCLUDE_AUTH_XPORT_H_
+
+#ifdef CONFIG_BT_XPORT
+#include <bluetooth/gatt.h>
+#endif
 
 
 /**
@@ -23,6 +27,32 @@
  */
 typedef void * auth_xport_hdl_t;
 
+
+
+/**
+ * Transport event type.
+ */
+enum auth_xport_evt_type
+{
+    XP_EVT_NONE = 0,
+    XP_EVT_CONNECT,
+    XP_EVT_DISCONNECT,
+    XP_EVT_RECONNECT,
+
+    /* transport specific events */
+    XP_EVT_SERIAL_BAUDCHANGE
+};
+
+/**
+ * Transport event structure
+ */
+struct auth_xport_evt
+{
+    enum auth_xport_evt_type event;
+
+    /* transport specific event information */
+    void *xport_ctx;
+};
 
 /**
  * Callback invoked when sending data asynchronously.
@@ -58,31 +88,36 @@ typedef int(*send_xport_t)(auth_xport_hdl_t xport_hdl, const uint8_t *data, cons
  */
 int auth_xport_init(auth_xport_hdl_t *xporthdl,  uint32_t flags, void *xport_params);
 
-
 /**
  * De-initializes the transport.  The lower layer transport should
  * free any allocated resources.
  *
  * @param xporthdl
  *
- * @return
+ * @return AUTH_SUCCESS or negative error value.
  */
 int auth_xport_deinit(const auth_xport_hdl_t xporthdl);
 
-// need to handle BLE connection, disconnection events.
+/**
+ * Forwards event to lower transport layer.
+ *
+ * @param xporthdl   Transport handle.
+ * @param event      Event
+ *
+ * @return AUTH_SUCCESS or negative error value.
+ */
 int auth_xport_event(const auth_xport_hdl_t xporthdl, struct auth_xport_evt *event);
 
 
-
 /**
- * Sends packet of data to peer, either blocking.
+ * Sends packet of data to peer.
  *
- * @param xporthdl
- * @param data
- * @param len
+ * @param xporthdl  Transport handle
+ * @param data      Buffer to send.
+ * @param len       Number of bytes to send.
  *
- * @return  Number of bytes sent on success, else error code.
- *
+ * @return  Number of bytes sent on success, can be less than requested.
+ *          On error, negative error code.
  */
 int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t len);
 
@@ -143,9 +178,8 @@ void auth_xport_set_sendfunc(auth_xport_hdl_t xporthdl, send_xport_t send_func);
  * @param xporthdl   Transport handle.
  * @param context    Context pointer to set.
  *
- * @return  AUTH_SUCCESS on success, else negative error code.
  */
-int auth_xport_set_context(auth_xport_hdl_t xporthdl, void *context);
+void auth_xport_set_context(auth_xport_hdl_t xporthdl, void *context);
 
 /**
  * Returns pointer to context.
@@ -173,11 +207,24 @@ struct auth_xp_bt_params
     const struct bt_gatt_attr *client_attr;
 };
 
+/**
+ * Initialize Bluetooth transport
+ */
+int auth_xp_bt_init(const auth_xport_hdl_t xport_hdl, uint32_t flags, void *xport_param);
+
+
+/**
+ * Deinit
+ */
+int auth_xp_bt_deinit(const auth_xport_hdl_t xport_hdl);
+
 /*
  * Called when the Central (client) writes to a Peripheral (server) characteristic.
  */
-size_t auth_xp_bt_central_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+ssize_t auth_xp_bt_central_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                                    const void *buf, u16_t len, u16_t offset, u8_t flags);
+
+
 
 /**
  * Called on the Central (client) when a Peripheral (server) writes/updates a characteristic.
@@ -186,6 +233,16 @@ size_t auth_xp_bt_central_write(struct bt_conn *conn, const struct bt_gatt_attr 
 u8_t auth_xp_bt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
                                    const void *data, u16_t length);
 
+
+/**
+ * Sends Bluetooth event to lower Bluetooth transport.
+ *
+ * @param xporthdl   Transport handle.
+ * @param event      The event.
+ *
+ * @return AUTH_SUCCESS, else negative error code.
+ */
+int auth_xp_bt_event(const auth_xport_hdl_t xporthdl, struct auth_xport_evt *event);
 
 #endif
 

@@ -170,6 +170,8 @@ int auth_sever_rx(struct authenticate_conn *conn, uint8_t *buf, size_t len);
  *        the Central and Peripheral.
  */
 
+
+#if 0
 /**
  * Initializes a IO buffer.
  *
@@ -222,7 +224,7 @@ int auth_buffer_get_wait(struct auth_io_buffer *iobuf, uint8_t *out_buf, int num
  *
  * @return  Number of bytes or error.
  */
-int auth_sbuffer_bytecount(struct auth_io_buffer *iobuf);
+int auth_buffer_bytecount(struct auth_io_buffer *iobuf);
 
 /**
  * Get number of bytes in buffer, wait number of msecs if no bytes are available.
@@ -262,7 +264,7 @@ bool auth_buffer_isfull(struct auth_io_buffer *iobuf);
  */
 int auth_buffer_clear(struct auth_io_buffer *iobuf);
 
-
+#endif 
 
 
 
