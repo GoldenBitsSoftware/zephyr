@@ -256,6 +256,14 @@ int auth_xp_bt_event(const auth_xport_hdl_t xporthdl, struct auth_xport_evt *eve
     return AUTH_SUCCESS;
 }
 
+
+int auth_xp_bt_get_mtu(const auth_xport_hdl_t xporthdl)
+{
+    struct auth_xport_connection_map *bt_xp_conn = auth_xport_get_context(xporthdl);
+
+    return (int)bt_gatt_get_mtu(bt_xp_conn->conn);
+}
+
 #if defined(CONFIG_BT_GATT_CLIENT)
 
 /**
@@ -270,11 +278,6 @@ u8_t auth_xp_bt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_pa
         LOG_ERR("Failed to get BT connection map.");
         return BT_GATT_ITER_CONTINUE;
     }
-
-    if(bt_xp_conn->payload_size == 0) {
-	 bt_xp_conn->payload_size = bt_gatt_get_mtu(conn) - BLE_LINK_HEADER_BYTES;
-    }
-
 
     //LOG_DBG("num bytes received: %d", length);
 
@@ -333,10 +336,6 @@ int auth_xp_bt_central_tx(struct auth_xport_connection_map *bt_xp_conn, const un
     write_params.func   = auth_xp_bt_central_write_cb;
     write_params.handle = bt_xp_conn->server_char_hdl;
     write_params.offset = 0;
-
-    if(bt_xp_conn->payload_size == 0) {
-	 bt_xp_conn->payload_size = bt_gatt_get_mtu(bt_xp_conn->conn) - BLE_LINK_HEADER_BYTES;
-    }
 
 
     /* if necessary break up the write */
@@ -416,14 +415,6 @@ int auth_xp_bt_peripheral_tx(struct auth_xport_connection_map *bt_xp_conn, const
     int total_bytes_sent = 0;
     bool done = false;
     size_t send_cnt = 0;
-
-    /* Check the payload_size, if not set correctly then set. Future enhancement
-     * should include a callback to notify the peripheral if the MTU has
-     * changed. */
-    if(bt_xp_conn->payload_size == 0) {
-        bt_xp_conn->payload_size = bt_gatt_get_mtu(bt_xp_conn->conn) - BLE_LINK_HEADER_BYTES;
-    }
-
 
     /* a little too verbose */
     /* LOG_DBG("auth_svc_peripheral_tx(), sending %d bytes.", len); */
@@ -511,11 +502,6 @@ ssize_t auth_xp_bt_central_write(struct bt_conn *conn, const struct bt_gatt_attr
     struct auth_xport_connection_map *bt_xp_conn = auth_xp_bt_getconn(conn);
 
     LOG_DBG("client write called, len: %d", len);
-
-    /* Set the MTU if not set */
-    if(bt_xp_conn->payload_size == 0) {
-	bt_xp_conn->payload_size = bt_gatt_get_mtu(conn) - BLE_LINK_HEADER_BYTES;
-    }
 
     // put the received bytes into the receive queue
     int err = auth_xport_put_recv_bytes(bt_xp_conn->xporthdl, buf, len);

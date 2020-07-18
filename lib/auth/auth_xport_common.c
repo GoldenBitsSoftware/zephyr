@@ -408,6 +408,20 @@ int auth_xport_event(const auth_xport_hdl_t xporthdl, struct auth_xport_evt *eve
     return ret;
 }
 
+int auth_xport_get_mtu(const auth_xport_hdl_t xporthdl)
+{
+    int mtu = 0;
+
+#if CONFIG_BT_XPORT
+   mtu = auth_xp_bt_get_mtu(xporthdl);
+#elif CONFIG_SERIAL_XPORT
+    mtu = auth_xp_serial_get_mtu(xporthdl);
+#else
+#error No lower transport defined.
+#endif
+    return mtu;
+}
+
 /**
  * @see auth_xport.h
  */
@@ -421,6 +435,13 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
     int num_frames = 0;
     int send_ret = AUTH_SUCCESS;
     struct auth_xport_frame frame;
+
+    /* If the lower transport MTU size isn't set, get it.  This can happen
+     * when the the MTU is negotiated after the initial connection. */
+    if(xp_inst->payload_size == 0) {
+	xp_inst->payload_size = auth_xport_get_mtu(xporthdl);
+    }
+
     const uint16_t max_frame = MIN(sizeof(frame), xp_inst->payload_size);
     const uint16_t max_payload = max_frame - sizeof(frame.frame_hdr);
 
@@ -531,6 +552,12 @@ int auth_xport_put_recv_bytes(const auth_xport_hdl_t xporthdl, const uint8_t *bu
 
     if(xp_inst == NULL) {
         return AUTH_ERROR_INVALID_PARAM;
+    }
+
+    /* If the lower transport MTU size isn't set, get it.  This can happen
+     * when the the MTU is negotiated after the initial connection. */
+    if(xp_inst->payload_size == 0) {
+	xp_inst->payload_size = auth_xport_get_mtu(xporthdl);
     }
 
     /* If not framing, then just put the data into the receive buffer */
