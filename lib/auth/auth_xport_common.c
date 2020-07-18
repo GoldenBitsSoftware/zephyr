@@ -322,7 +322,7 @@ static int auth_xport_internal_send(const auth_xport_hdl_t xporthdl, const uint8
 
     /* if the lower transport set a send function, call it */
     if (xp_inst->send_func != NULL) {
-        return xp_inst->send_func(xp_inst->xport_ctx, data, len);
+        return xp_inst->send_func(xporthdl, data, len);
     }
 
     /* queue the send bytes into tx buffer */
