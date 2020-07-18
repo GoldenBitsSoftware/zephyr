@@ -20,8 +20,7 @@
 LOG_MODULE_REGISTER(auth_bt_xport, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 
 
-
-
+#define BLE_LINK_HEADER_BYTES               (2u + 1u)  /**< two bytes for header, not sure about extra byte */
 
 /**
  * Maps transport handle to a BT connection.
@@ -86,6 +85,7 @@ static struct auth_xport_connection_map *auth_xp_bt_getconn(struct bt_conn *conn
 }
 
 
+#if defined(CONFIG_BT_GATT_CLIENT)
 /**
  *  Called by the Central (Client( to send bytes to the peripheral (server)
  *
@@ -109,7 +109,7 @@ static int auth_xp_bt_central_send(auth_xport_hdl_t xport_hdl, const uint8_t *da
 
     return ret;
 }
-
+#else
 /**
  *
  * @param xport_hdl
@@ -132,7 +132,7 @@ static int auth_xp_bt_peripheral_send(auth_xport_hdl_t xport_hdl, const uint8_t 
 
     return ret;
 }
-
+#endif  /* CONFIG_BT_GATT_CLIENT */
 
 
 /**
@@ -157,7 +157,7 @@ int auth_xp_bt_init(const auth_xport_hdl_t xport_hdl, uint32_t flags, void *xpor
     /* set direct call function */
     auth_xport_set_sendfunc(xport_hdl, auth_xp_bt_central_send);
 #else
-    if(!bt_params->is_central)
+    if(bt_params->is_central)
     {
         LOG_ERR("Invalid config, is_central is set for GATT server");
         return AUTH_ERROR_INVALID_PARAM;
@@ -216,6 +216,11 @@ int auth_xp_bt_init(const auth_xport_hdl_t xport_hdl, uint32_t flags, void *xpor
  */
 int auth_xp_bt_deinit(const auth_xport_hdl_t xport_hdl)
 {
+    if( xport_hdl == NULL) {
+	LOG_ERR("Transport handle is NULL.");
+	return AUTH_ERROR_INVALID_PARAM;
+    }
+
     /* get xport context which is where the BT connection is saved */
     struct auth_xport_connection_map *bt_xp_conn = auth_xport_get_context(xport_hdl);
 
@@ -265,6 +270,11 @@ u8_t auth_xp_bt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_pa
         LOG_ERR("Failed to get BT connection map.");
         return BT_GATT_ITER_CONTINUE;
     }
+
+    if(bt_xp_conn->payload_size == 0) {
+	 bt_xp_conn->payload_size = bt_gatt_get_mtu(conn) - BLE_LINK_HEADER_BYTES;
+    }
+
 
     //LOG_DBG("num bytes received: %d", length);
 
@@ -323,6 +333,10 @@ int auth_xp_bt_central_tx(struct auth_xport_connection_map *bt_xp_conn, const un
     write_params.func   = auth_xp_bt_central_write_cb;
     write_params.handle = bt_xp_conn->server_char_hdl;
     write_params.offset = 0;
+
+    if(bt_xp_conn->payload_size == 0) {
+	 bt_xp_conn->payload_size = bt_gatt_get_mtu(bt_xp_conn->conn) - BLE_LINK_HEADER_BYTES;
+    }
 
 
     /* if necessary break up the write */
@@ -407,7 +421,7 @@ int auth_xp_bt_peripheral_tx(struct auth_xport_connection_map *bt_xp_conn, const
      * should include a callback to notify the peripheral if the MTU has
      * changed. */
     if(bt_xp_conn->payload_size == 0) {
-        bt_xp_conn->payload_size = bt_gatt_get_mtu(auth_conn->conn) - BLE_LINK_HEADER_BYTES;
+        bt_xp_conn->payload_size = bt_gatt_get_mtu(bt_xp_conn->conn) - BLE_LINK_HEADER_BYTES;
     }
 
 
@@ -425,7 +439,7 @@ int auth_xp_bt_peripheral_tx(struct auth_xport_connection_map *bt_xp_conn, const
 
 
     indicate_params.uuid = BT_UUID_AUTH_SVC_CLIENT_CHAR;
-    indicate_params.attr = bt_xp_conn->auth_client_attr;
+    indicate_params.attr = bt_xp_conn->client_attr;
     indicate_params.func = auth_xp_bt_peripheral_indicate;
 
     while (!done)
@@ -497,6 +511,11 @@ ssize_t auth_xp_bt_central_write(struct bt_conn *conn, const struct bt_gatt_attr
     struct auth_xport_connection_map *bt_xp_conn = auth_xp_bt_getconn(conn);
 
     LOG_DBG("client write called, len: %d", len);
+
+    /* Set the MTU if not set */
+    if(bt_xp_conn->payload_size == 0) {
+	bt_xp_conn->payload_size = bt_gatt_get_mtu(conn) - BLE_LINK_HEADER_BYTES;
+    }
 
     // put the received bytes into the receive queue
     int err = auth_xport_put_recv_bytes(bt_xp_conn->xporthdl, buf, len);

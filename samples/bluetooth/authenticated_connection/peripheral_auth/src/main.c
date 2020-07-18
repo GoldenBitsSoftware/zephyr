@@ -20,10 +20,14 @@
 #include <bluetooth/uuid.h>
 #include <bluetooth/gatt.h>
 #include <bluetooth/l2cap.h>
+
+
 #include <logging/log.h>
 #include <logging/log_ctrl.h>
 
-#include <bluetooth/services/auth_svc.h>
+#include <auth/auth_lib.h>
+
+LOG_MODULE_REGISTER(periph_auth, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 
 #if defined(CONFIG_AUTH_DTLS)
 #include "../cert_chain/ble_auth_all_certs/bleauth_ca_chain.h"
@@ -32,8 +36,6 @@
 #include "../cert_chain/ble_auth_all_certs/bleauth_peripheral_key.h"
 #include "../cert_chain/ble_auth_all_certs/bleauth_central_key.h"
 #endif
-
-static auth_xport_hdl_t xpt_hdl;
 
 
 static void client_ccc_cfg_changed(const struct bt_gatt_attr *attr, u16_t value);
@@ -63,7 +65,7 @@ BT_GATT_SERVICE_DEFINE(auth_svc,
      * to the server (peripheral)
      */
     BT_GATT_CHARACTERISTIC(BT_UUID_AUTH_SVC_SERVER_CHAR, BT_GATT_CHRC_WRITE,
-           (BT_GATT_PERM_READ|BT_GATT_PERM_WRITE), NULL, auth_xport_ble_central_write, NULL),
+           (BT_GATT_PERM_READ|BT_GATT_PERM_WRITE), NULL, auth_xp_bt_central_write, NULL),
 );
 
 
@@ -139,6 +141,12 @@ static void connected(struct bt_conn *conn, u8_t err)
             return;
         }
 
+	// DAG DEBUG BEG
+	// Need to figure out how the peripheral get's notified
+	// of the MTU size change
+	printk("*** MTU size is: %d", bt_gatt_get_mtu(conn));
+	// DAG DEBUG END
+
         is_connected = true;
 
         /* send connection event to BT transport */
@@ -146,10 +154,10 @@ static void connected(struct bt_conn *conn, u8_t err)
         auth_xport_event(auth_conn.xport_hdl, &conn_evt);
 
         /* Start authentication */
-        int ret = auth_svc_start(&auth_conn);
+        int ret = auth_lib_start(&auth_conn);
 
         if(ret) {
-            printk("Failed to start authentication service, err: %d\n", ret);
+            printk("Failed to start authentication, err: %d\n", ret);
         }
     }
 }
@@ -226,10 +234,10 @@ static void bt_ready(int err)
 }
 
 
-static void auth_status(struct authenticate_conn *auth_conn, auth_status_t status, void *context)
+static void auth_status(struct authenticate_conn *auth_conn, enum auth_status status, void *context)
 {
     /* print out auth status */
-    printk("Authentication status: %s\n", auth_svc_getstatus_str(status));
+    printk("Authentication status: %s\n", auth_lib_getstatus_str(status));
 }
 
 
@@ -261,7 +269,7 @@ void main(void)
 {
     log_init();
 
-    uint32_t auth_flags = AUTH_CONN_PERIPHERAL;
+    uint32_t auth_flags = AUTH_CONN_SERVER;
 
 
 #if defined(CONFIG_AUTH_DTLS)
@@ -278,7 +286,7 @@ void main(void)
 #endif
 
 
-    int err = auth_svc_init(&auth_conn, auth_status, NULL, auth_flags);
+    int err = auth_lib_init(&auth_conn, auth_status, NULL, auth_flags);
 
     if(err){
         printk("Failed to init authentication service.\n");
