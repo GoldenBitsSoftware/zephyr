@@ -256,12 +256,14 @@ int auth_xp_bt_event(const auth_xport_hdl_t xporthdl, struct auth_xport_evt *eve
     return AUTH_SUCCESS;
 }
 
-
-int auth_xp_bt_get_mtu(const auth_xport_hdl_t xporthdl)
+/**
+ * @see auth_xport.h
+ */
+int auth_xp_bt_get_max_payload(const auth_xport_hdl_t xporthdl)
 {
     struct auth_xport_connection_map *bt_xp_conn = auth_xport_get_context(xporthdl);
 
-    return (int)bt_gatt_get_mtu(bt_xp_conn->conn);
+    return (int)bt_gatt_get_mtu(bt_xp_conn->conn) - BLE_LINK_HEADER_BYTES;
 }
 
 #if defined(CONFIG_BT_GATT_CLIENT)
@@ -340,7 +342,7 @@ int auth_xp_bt_central_tx(struct auth_xport_connection_map *bt_xp_conn, const un
     /* Set payload size if not set.  This is necessary when the MTU
      * size is negotiated after the BT connection has been established. */
     if(bt_xp_conn->payload_size == 0) {
-        bt_xp_conn->payload_size = bt_gatt_get_mtu(bt_xp_conn->conn);
+        bt_xp_conn->payload_size = auth_xp_bt_get_max_payload(bt_xp_conn->xporthdl);
     }
 
 
@@ -428,7 +430,7 @@ int auth_xp_bt_peripheral_tx(struct auth_xport_connection_map *bt_xp_conn, const
     /* Set payload size if not set.  This is necessary when the MTU
      * size is negotiated after the BT connection has been established. */
     if(bt_xp_conn->payload_size == 0) {
-        bt_xp_conn->payload_size = bt_gatt_get_mtu(bt_xp_conn->conn);
+        bt_xp_conn->payload_size = auth_xp_bt_get_max_payload(bt_xp_conn->xporthdl);
     }
 
 

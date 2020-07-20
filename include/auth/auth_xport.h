@@ -190,6 +190,17 @@ void auth_xport_set_context(auth_xport_hdl_t xporthdl, void *context);
  */
 void *auth_xport_get_context(auth_xport_hdl_t xporthdl);
 
+/**
+ * Get the application max payload the lower transport can handle in one
+ * in one frame.  The common transport functions will break up a larger
+ * application packet into multiple frames.
+ *
+ * @param xporthdl   Transport handle.
+ *
+ * @return The max payload, or negative error number.
+ */
+int auth_xport_get_max_payload(const auth_xport_hdl_t xporthdl);
+
 
 #ifdef CONFIG_BT_XPORT
 
@@ -245,13 +256,14 @@ u8_t auth_xp_bt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_pa
 int auth_xp_bt_event(const auth_xport_hdl_t xporthdl, struct auth_xport_evt *event);
 
 /**
- * Gets the lower transport MTU.
+ * Gets the maximum payload for the lower transport.  This is the
+ * usable payload by the application.
  *
  * @param xporthdl   Transport handle.
  *
- * @return The mtu size in bytes.
+ * @return Max application payload.
  */
-int auth_xp_bt_get_mtu(const auth_xport_hdl_t xporthdl);
+int auth_xp_bt_get_max_payload(const auth_xport_hdl_t xporthdl);
 
 #endif
 
