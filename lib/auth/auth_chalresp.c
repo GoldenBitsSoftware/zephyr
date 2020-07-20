@@ -130,7 +130,7 @@ static bool auth_check_msg(struct chalresp_header *hdr, const uint8_t msg_id)
 static bool auth_client_send_challenge(struct authenticate_conn *auth_conn, const uint8_t *random_chal)
 {
     int numbytes;
-    struct central_challenge chal;
+    struct client_challenge chal;
 
      /* build and send challenge message to Peripheral */
     memset(&chal, 0, sizeof(chal));
@@ -151,7 +151,8 @@ static bool auth_client_send_challenge(struct authenticate_conn *auth_conn, cons
     return true;
 }
 
-static bool auth_client_recv_chal_resp(struct authenticate_conn *auth_conn, const uint8_t *random_chal, auth_status_t *status)
+static bool auth_client_recv_chal_resp(struct authenticate_conn *auth_conn, const uint8_t *random_chal,
+                                       enum auth_status *status)
 {
     uint8_t hash[AUTH_CHAL_RESPONSE_LEN];
     int numbytes;
@@ -195,7 +196,7 @@ static bool auth_client_recv_chal_resp(struct authenticate_conn *auth_conn, cons
     }
 
     /* Does the response match what is expected? */
-    if(memcmp(hash, server_resp.periph_response, sizeof(hash))) {
+    if(memcmp(hash, server_resp.server_response, sizeof(hash))) {
         /* authententication failed */
         LOG_ERR("Server authentication failed.");
         *status = AUTH_STATUS_AUTHENTICATION_FAILED;
@@ -230,7 +231,7 @@ static bool auth_client_recv_chal_resp(struct authenticate_conn *auth_conn, cons
      }
      
      /* send Client's response to the Server's random challenge */
-     numbytes = auth_xport_send(auth_conn->xport_hdl, (uint8_t*)&central_resp, sizeof(central_resp));
+     numbytes = auth_xport_send(auth_conn->xport_hdl, (uint8_t*)&client_resp, sizeof(client_resp));
 
     if((numbytes <= 0) || (numbytes != sizeof(client_resp))) {
         LOG_ERR("Failed to send Client response.");
@@ -394,8 +395,8 @@ void auth_chalresp_thread(void *arg1, void *arg2, void *arg3)
     /* generate random number as challenge */
     sys_rand_get(random_chal, sizeof(random_chal));
 
-#if defined(CONFIG_AUTH_CLIENT)
 
+#if defined(CONFIG_AUTH_CLIENT)
     int numbytes;
     struct auth_chalresp_result server_result;
 
@@ -420,12 +421,12 @@ void auth_chalresp_thread(void *arg1, void *arg2, void *arg3)
     /* Wait for the final response from the Server indicating success or failure
      * of the Client's response. */
 
-    numbytes = auth_xport_recv(auth_conn->xport_hdl, (uint8_t*)&sever_result,
+    numbytes = auth_xport_recv(auth_conn->xport_hdl, (uint8_t*)&server_result,
                                         sizeof(server_result), AUTH_RX_TIMEOUT_MSEC);
 
     if((numbytes <= 0) || (numbytes != sizeof(server_result))) {
         LOG_ERR("Failed to receive server authentication result.");
-        auth_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
+        auth_lib_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
         return;
     }
 
@@ -439,7 +440,7 @@ void auth_chalresp_thread(void *arg1, void *arg2, void *arg3)
     /* check the SErver result */
     if(server_result.result != 0) {
         LOG_ERR("Authentication with server failed.");
-        auth_liv_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
+        auth_lib_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
     } else {
         LOG_INF("Authentication with server successful.");
         auth_lib_set_status(auth_conn, AUTH_STATUS_SUCCESSFUL);

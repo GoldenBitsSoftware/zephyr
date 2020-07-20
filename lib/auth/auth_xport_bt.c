@@ -337,6 +337,12 @@ int auth_xp_bt_central_tx(struct auth_xport_connection_map *bt_xp_conn, const un
     write_params.handle = bt_xp_conn->server_char_hdl;
     write_params.offset = 0;
 
+    /* Set payload size if not set.  This is necessary when the MTU
+     * size is negotiated after the BT connection has been established. */
+    if(bt_xp_conn->payload_size == 0) {
+        bt_xp_conn->payload_size = bt_gatt_get_mtu(bt_xp_conn->conn);
+    }
+
 
     /* if necessary break up the write */
     while(len != 0) {
@@ -418,6 +424,12 @@ int auth_xp_bt_peripheral_tx(struct auth_xport_connection_map *bt_xp_conn, const
 
     /* a little too verbose */
     /* LOG_DBG("auth_svc_peripheral_tx(), sending %d bytes.", len); */
+
+    /* Set payload size if not set.  This is necessary when the MTU
+     * size is negotiated after the BT connection has been established. */
+    if(bt_xp_conn->payload_size == 0) {
+        bt_xp_conn->payload_size = bt_gatt_get_mtu(bt_xp_conn->conn);
+    }
 
 
     /* Setup the indicate params.  The client will use BLE indications vs.
