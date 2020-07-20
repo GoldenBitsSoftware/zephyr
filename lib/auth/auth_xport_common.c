@@ -459,7 +459,7 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
     frame.frame_hdr = XPORT_FRAME_SYNC_BITS|XPORT_FRAME_BEGIN;
 
     /* Break up data to fit into lower transport MTU */
-    while (len > 0 && send_ret == AUTH_SUCCESS) {
+    while (len > 0) {
 
         /* get payload bytes */
         payload_bytes = MIN(max_payload, len);
@@ -504,7 +504,7 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
         num_frames++;
    }
 
-    return send_ret;
+    return send_count;
 }
 
 /**
