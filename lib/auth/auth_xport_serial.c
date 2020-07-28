@@ -88,8 +88,7 @@ static uint8_t *serial_get_xp_buffer(uint32_t buflen)
 
     /* check array of tx buffers */
     for(cnt = 0; cnt < NUM_BUFFERS; cnt++) {
-
-        if(atomic_test_and_set_bit(buffer_in_use, cnt)) {
+        if(!atomic_test_and_set_bit(buffer_in_use, cnt)) {
             return serial_xp_bufs[cnt].buffer;
         }
     }
