@@ -21,7 +21,7 @@
 
 #define LOG_LEVEL CONFIG_BT_GATT_AUTHS_LOG_LEVEL
 #include <logging/log.h>
-LOG_MODULE_DECLARE(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
+LOG_MODULE_DECLARE(auth_lib, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
 
 #include <bluetooth/services/auth_svc.h>
 

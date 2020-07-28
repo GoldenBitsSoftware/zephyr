@@ -9,9 +9,10 @@ menuconfig AUTH_LIB
 
 if AUTH_LIB
 	config AUTH_CHALLENGE_RESPONSE
-		bool "Challenge Response"
+		bool "Challenge Response (Must use TINYCRYPT and TINYCRYPT_SHA256)"
 		help
 		Selects the Challenge Response authentication method.
+		Must use TINYCRYPT and TINYCRYPT_SHA256
 
 	config AUTH_DTLS
 		bool "DTLS Authentication"
@@ -19,7 +20,7 @@ if AUTH_LIB
 		Selects the DTLS authentication method.
 
 	config AUTH_CLIENT
-		bool "Authentication Client"
+		bool "Authentication Client Role"
         help
         Select if in client role.
 
@@ -42,7 +43,7 @@ if AUTH_LIB
 		help
 		If using Bluetooth to authenticate peer.
 
-    config CONFIG_SERIAL_XPORT
+    config SERIAL_XPORT
 		bool "Serial Transport"
 		help
 		If using serial port to authenticate peer.

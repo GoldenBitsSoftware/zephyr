@@ -144,7 +144,7 @@ static void connected(struct bt_conn *conn, u8_t err)
 	// DAG DEBUG BEG
 	// Need to figure out how the peripheral get's notified
 	// of the MTU size change
-	printk("*** MTU size is: %d", bt_gatt_get_mtu(conn));
+	printk("*** MTU size is: %d\n", bt_gatt_get_mtu(conn));
 	// DAG DEBUG END
 
         is_connected = true;

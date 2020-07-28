@@ -16,18 +16,18 @@
 #include <auth/auth_lib.h>
 #include <random/rand32.h>
 
-#include <mbedtls/error.h>
-#include <mbedtls/sha256.h>
+#include <tinycrypt/constants.h>
+#include <tinycrypt/sha256.h>
 
 
 
 #define LOG_LEVEL CONFIG_AUTH_LOG_LEVEL
 #include <logging/log.h>
-LOG_MODULE_DECLARE(AUTH_LIB_LOG_MODULE, CONFIG_AUTH_LOG_LEVEL);
+LOG_MODULE_DECLARE(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 
 #include "auth_internal.h"
 
-#define AUTH_SHA256_HASH                    (32u)
+#define AUTH_SHA256_HASH                    (TC_SHA256_DIGEST_SIZE)
 #define AUTH_SHARED_KEY_LEN                 (32u)
 #define AUTH_CHALLENGE_LEN                  (32u)
 #define AUTH_CHAL_RESPONSE_LEN              AUTH_SHA256_HASH
@@ -94,24 +94,19 @@ static uint8_t shared_key[AUTH_SHARED_KEY_LEN] = {
 static int auth_chalresp_hash(const uint8_t *random_chal, uint8_t *hash)
 {
     int err = 0;
-    mbedtls_sha256_context ctx;
+    struct tc_sha256_state_struct hash_state;
 
-    mbedtls_sha256_init(&ctx);
+    tc_sha256_init(&hash_state);
 
-    err = mbedtls_sha256_starts_ret(&ctx, false);
-
-    if(err) {
-        return err;
-    }
 
     /* Update the hash with the random challenge followed by the shared key. */
-    if((err = mbedtls_sha256_update_ret(&ctx, random_chal, AUTH_CHALLENGE_LEN)) != 0 ||
-       (err = mbedtls_sha256_update_ret(&ctx, shared_key, AUTH_SHARED_KEY_LEN)) != 0) {
-        return err;
+    if((err = tc_sha256_update(&hash_state, random_chal, AUTH_CHALLENGE_LEN)) != TC_CRYPTO_SUCCESS ||
+       (err = tc_sha256_update(&hash_state, shared_key, AUTH_SHARED_KEY_LEN)) != TC_CRYPTO_SUCCESS) {
+        return AUTH_CRYPTO_ERROR;
     }
 
     /* calc the final hash */
-    err = mbedtls_sha256_finish_ret(&ctx, hash);
+    err = tc_sha256_final(hash, &hash_state);
 
     return err;
 }
@@ -447,7 +442,6 @@ void auth_chalresp_thread(void *arg1, void *arg2, void *arg3)
     }
 
     /* exit thread */
-
 #else
 
     /* Check code is configured to run as a Peripheral */

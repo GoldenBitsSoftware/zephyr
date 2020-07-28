@@ -17,7 +17,7 @@
 
 #include <logging/log_ctrl.h>
 #include <logging/log.h>
-LOG_MODULE_DECLARE(AUTH_LIB_LOG_MODULE, CONFIG_AUTH_LOG_LEVEL);
+LOG_MODULE_REGISTER(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 
 #include <auth/auth_lib.h>
 //#include "auth_internal.h"
@@ -154,6 +154,16 @@ int auth_lib_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_f
 #ifdef CONFIG_LOOPBACK_TEST
     auth_conn->auth_thread_func = auth_looback_thread;
 #endif
+
+    return AUTH_SUCCESS;
+}
+
+/**
+ * @see auth_lib.h
+ */
+int auth_lib_deinit(struct authenticate_conn *auth_conn)
+{
+    /* TBD: Free any resources */
 
     return AUTH_SUCCESS;
 }

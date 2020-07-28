@@ -36,6 +36,7 @@ extern "C" {
 #define AUTH_ERROR_INTERNAL                 (AUTH_ERROR_BASE - 7)
 #define AUTH_ERROR_XPORT_SEND               (AUTH_ERROR_BASE - 8)
 #define AUTH_ERROR_XPORT_FRAME              (AUTH_ERROR_BASE - 9)
+#define AUTH_CRYPTO_ERROR		    (AUTH_ERROR_BASE - 10)
 
 
 /**
@@ -47,9 +48,6 @@ extern "C" {
 #define AUTH_CONN_CHALLENGE_AUTH_METHOD     0x0008
 
 
-
-/* Log module for the authentication library. */
-#define AUTH_LIB_LOG_MODULE             auth_lib
 
 
 /**
@@ -155,36 +153,9 @@ struct authenticate_conn
     /* authentication thread for this connection */
     k_thread_entry_t auth_thread_func;
 
-#if 0
-    /* Semaphore used when waiting for write (for central) to complete */
-    struct k_sem auth_central_write_sem;
-
-    /* Semaphore used when processing peripheral indications */
-    struct k_sem auth_indicate_sem;
-    uint32_t indicate_err;
-
-    volatile u8_t write_att_err;
-
-
-    /* Server characteristic handle, used by the Central to send
-     * authentication messages to the Peripheral */
-    uint16_t server_char_handle;
-
-    uint16_t payload_size;  /* BLE Link MTU less struct bt_att_write_req */
-
-    /* Attributes, these should be used by the Peripheral, not used by the Central. */
-    const struct bt_gatt_attr *auth_svc_attr;    /* service attribute */
-    const struct bt_gatt_attr *auth_client_attr; /* Client attribute */
-    const struct bt_gatt_attr *auth_server_attr; /* Server attribute */
-
-
-    /* IO buffer used by the Central and Peripheral */
-    struct auth_io_buffer rx_buf;
-#endif
-
 
     /* Pointer to internal details, do not touch!!! */
-    void *internal_obj;
+    //void *internal_obj;
 
 #if defined(CONFIG_AUTH_DTLS)
     /* @brief Struct used to keep/point to all of the certs needed
@@ -247,6 +218,14 @@ int auth_lib_start(struct authenticate_conn *auth_conn);
  */
 enum auth_status auth_lib_get_status(struct authenticate_conn *auth_conn);
 
+/**
+ * Helper routine to return string corresponding to status
+ *
+ * @param   status  Authentication status value.
+ *
+ * @return  Pointer to string representing the status.
+ */
+const char *auth_lib_getstatus_str(enum auth_status status);
 
 /**
  * Set the current authentication status, will also invoke the callback
@@ -267,14 +246,7 @@ void auth_svc_lib_status(struct authenticate_conn *auth_conn, enum auth_status s
  */
 int auth_lib_cancel(struct authenticate_conn *auth_conn);
 
-/**
- * Helper routine to return string corresponding to status
- *
- * @param   status  Authentication status value.
- *
- * @return  Pointer to string representing the status.
- */
-const char *auth_lib_getstatus_str(enum auth_status status);
+
 
 
 void auth_lib_set_status(struct authenticate_conn *auth_conn, enum auth_status status);

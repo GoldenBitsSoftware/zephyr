@@ -256,8 +256,8 @@ u8_t auth_xp_bt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_pa
 int auth_xp_bt_event(const auth_xport_hdl_t xporthdl, struct auth_xport_evt *event);
 
 /**
- * Gets the maximum payload for the lower transport.  This is the
- * usable payload by the application.
+ * Gets the maximum payload for the Bluetooth link, which is the MTU less any
+ * Bluetooth link overhead.
  *
  * @param xporthdl   Transport handle.
  *
@@ -268,6 +268,45 @@ int auth_xp_bt_get_max_payload(const auth_xport_hdl_t xporthdl);
 #endif
 
 #ifdef CONFIG_SERIAL_XPORT
+
+struct auth_xp_serial_params
+{
+    struct device *serial_dev; /* pointer to Uart instance */
+    uint16_t payload_size;
+};
+
+/**
+ * Initialize Serial lower layer transport.
+ */
+int auth_xp_serial_init(const auth_xport_hdl_t xport_hdl, uint32_t flags, void *xport_param);
+
+
+/**
+ * Deinit
+ */
+int auth_xp_serial_deinit(const auth_xport_hdl_t xport_hdl);
+
+
+/**
+ * Sends an event to lower serial transport.
+ *
+ * @param xporthdl   Transport handle.
+ * @param event      The event.
+ *
+ * @return AUTH_SUCCESS, else negative error code.
+ */
+int auth_xp_serial_event(const auth_xport_hdl_t xporthdl, struct auth_xport_evt *event);
+
+
+/**
+ * Gets the maximum payload for the serial link.
+ *
+ * @param xporthdl   Transport handle.
+ *
+ * @return Max application payload.
+ */
+int auth_xp_serial_get_max_payload(const auth_xport_hdl_t xporthdl);
+
 #endif
 
 

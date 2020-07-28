@@ -1,7 +1,7 @@
 /**
- *  @file  auth_svc.c
+ *  @file  auth_xport.c
  *
- *  @brief  BLE service to authenticate the BLE connection at the application layer.
+ *  @brief  BLE transport layer.
  */
 
 #include <zephyr/types.h>
@@ -17,7 +17,7 @@
 
 #define LOG_LEVEL CONFIG_AUTH_LOGLEVEL
 #include <logging/log.h>
-LOG_MODULE_REGISTER(auth_bt_xport, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
+LOG_MODULE_REGISTER(auth_bt_xport, CONFIG_AUTH_LOGLEVEL);
 
 
 #define BLE_LINK_HEADER_BYTES               (2u + 1u)  /**< two bytes for header, not sure about extra byte */
@@ -61,7 +61,6 @@ struct auth_xport_connection_map {
 
 static struct auth_xport_connection_map bt_conn_map[CONFIG_BT_MAX_CONN];
 
-typedef int(*send_xport_t)(auth_xport_hdl_t xport_hdl, const uint8_t *data, const size_t len);
 
 /**
  *  Forward declarations

@@ -13,7 +13,7 @@
 
 #define LOG_LEVEL CONFIG_AUTH_LOG_LEVEL
 #include <logging/log.h>
-LOG_MODULE_DECLARE(AUTH_LIB_LOG_MODULE, CONFIG_AUTH_LOG_LEVEL);
+LOG_MODULE_DECLARE(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 
 #include <auth/auth_lib.h>
 #include <auth/auth_xport.h>
@@ -382,7 +382,7 @@ int auth_xport_deinit(const auth_xport_hdl_t xporthdl)
 #if CONFIG_BT_XPORT
     ret = auth_xp_bt_deinit(xporthdl);
 #elif CONFIG_SERIAL_XPORT
-    ret = auth_xp_serial_deinit(xporthdl, 0);
+    ret = auth_xp_serial_deinit(xporthdl);
 #else
 #error No lower transport defined.
 #endif
@@ -415,7 +415,7 @@ int auth_xport_get_max_payload(const auth_xport_hdl_t xporthdl)
 #if CONFIG_BT_XPORT
    mtu = auth_xp_bt_get_max_payload(xporthdl);
 #elif CONFIG_SERIAL_XPORT
-    mtu = auth_xp_serial_get_mtu(xporthdl);
+    mtu = auth_xp_serial_get_max_payload(xporthdl);
 #else
 #error No lower transport defined.
 #endif
