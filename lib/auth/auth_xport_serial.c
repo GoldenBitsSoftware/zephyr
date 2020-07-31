@@ -32,8 +32,12 @@ LOG_MODULE_REGISTER(auth_serial_xport, CONFIG_AUTH_LOG_LEVEL);
 struct serial_xp_instance
 {
     bool in_use;
-    struct device *serial_dev;
+    struct device *uart_dev;
     auth_xport_hdl_t xport_hdl;
+
+    /* dummy buffer */
+    uint8_t test_data[30];
+    uint32_t tx_bytes;   // num bytes to send
 };
 
 /* Buffer used for TX/RX */
@@ -134,13 +138,80 @@ static void auth_xp_serial_free_instance(struct serial_xp_instance *serial_inst)
 {
     if(serial_inst != NULL) {
         serial_inst->in_use = false;
-        serial_inst->serial_dev = NULL;
+        serial_inst->uart_dev = NULL;
         serial_inst->xport_hdl = NULL;
     }
 }
 
 
-static void auth_xp_uart_cb(struct uart_event *evt, void *user_data)
+//static void auth_xp_uart_cb(struct uart_event *evt, void *user_data)
+
+/**
+ * For interrupt driven IO
+ *
+ * @param user_data
+ */
+static void auth_xp_serial_irq_cb(void *user_data)
+{
+    int num_bytes = 0;
+    uint8_t tempbuf[100];
+    enum uart_rx_stop_reason rx_stop;
+    struct serial_xp_instance *xp_inst = (struct serial_xp_instance *) user_data;
+    struct device *uart_dev = xp_inst->uart_dev;
+
+    uart_irq_update(uart_dev);
+
+    /* did an error happen */
+    rx_stop = uart_err_check(uart_dev);
+
+    if(rx_stop != 0){
+        /* handle error */
+        //UART_ERROR_OVERRUN
+        //UART_ERROR_PARITY
+       // UART_ERROR_FRAMING
+        //UART_ERROT_BREAK
+        LOG_ERR("UART error: %d", rx_stop);
+        return;
+    }
+
+    /* read any chars first */
+    while(uart_irq_rx_ready(uart_dev)) {
+
+        num_bytes = uart_fifo_read(uart_dev, tempbuf, sizeof(tempbuf));
+        LOG_INF("Read %d bytes.", num_bytes);
+
+        /* fill buffer */
+    }
+
+    /* put data into rx buffer */
+    /* NOTE: this grabs a lock, should not do this in an irq, start
+     * work item to fill RX buffer */
+
+    /* any pending TX buffers ? */
+    if(xp_inst->tx_bytes == 0) {
+        return;
+    }
+
+    while(uart_irq_tx_ready(uart_dev)) {
+
+        num_bytes = uart_fifo_fill(uart_dev, xp_inst->test_data, xp_inst->tx_bytes);
+
+        /* check return can this be an error? */
+        xp_inst->tx_bytes -= num_bytes;
+
+
+
+        /* if not more data to send, then break */
+    }
+
+
+}
+
+
+
+
+#if 0
+static void __attribute__((optimize("O0"))) auth_xp_uart_cb(struct uart_event *evt, void *user_data)
 {
     int err;
     struct serial_xp_instance *serial_inst = (struct serial_xp_instance *)user_data;
@@ -227,6 +298,7 @@ static void auth_xp_uart_cb(struct uart_event *evt, void *user_data)
             LOG_ERR("RX stopped, reason: 0x%x", evt->data.rx_stop.reason);
             /* free RX buffers */
             serial_free_xp_buffer(evt->data.rx_stop.data.buf);
+            LOG_INF("Rx stopped.");
             break;
         }
 
@@ -235,6 +307,7 @@ static void auth_xp_uart_cb(struct uart_event *evt, void *user_data)
     }
 
 }
+#endif
 
 static int auth_xp_serial_send(auth_xport_hdl_t xport_hdl, const uint8_t *data, const size_t len)
 {
@@ -244,6 +317,11 @@ static int auth_xp_serial_send(auth_xport_hdl_t xport_hdl, const uint8_t *data, 
     }
 
     struct serial_xp_instance *serial_inst = (struct serial_xp_instance *)auth_xport_get_context(xport_hdl);
+
+
+    /* is there a pending TX operation?  If so return busy error */
+    //TODO: Check atomic vars in serial_inst
+
 
     /* get free buffer for tx */
     uint8_t *tx_buf = serial_get_xp_buffer(len);
@@ -259,13 +337,20 @@ static int auth_xp_serial_send(auth_xport_hdl_t xport_hdl, const uint8_t *data, 
     /* fill buffer, set as _in use */
     memcpy(tx_buf, data, len);
 
-    int err = uart_tx(serial_inst->serial_dev, tx_buf, len, TX_TIMEOUT_MSEC);
+// DAG DEBUG BEG
+    LOG_ERR("***Setting buffer");
+    memset(serial_inst->test_data, 'A', sizeof(serial_inst->test_data));
+    serial_inst->tx_bytes = sizeof(serial_inst->test_data);
+// DAG DEBUG END
 
-    if(err) {
-        LOG_ERR("Failed to send tx, err: %d", err);
-    }
+    //int err = uart_tx(serial_inst->uart_dev, tx_buf, len, TX_TIMEOUT_MSEC);
 
-    return err;
+    /* should kick of an interrupt */
+    uart_irq_tx_enable(serial_inst->uart_dev);
+
+    LOG_INF("Started TX operation");
+
+    return 0;
 }
 
 /**
@@ -282,12 +367,16 @@ int auth_xp_serial_init(const auth_xport_hdl_t xport_hdl, uint32_t flags, void *
         return AUTH_ERROR_NO_RESOURCE;
     }
 
-    serial_inst->serial_dev = serial_param->serial_dev;
     serial_inst->xport_hdl = xport_hdl;
+    serial_inst->uart_dev = serial_param->uart_dev;
+
     //  serial_param->payload_size  ??
 
     /* set serial event callback */
-    uart_callback_set(serial_inst->serial_dev, auth_xp_uart_cb, serial_inst);
+    //uart_callback_set(serial_inst->serial_dev, auth_xp_uart_cb, serial_inst);
+
+    uart_irq_callback_user_data_set(serial_inst->uart_dev, auth_xp_serial_irq_cb, serial_inst);
+
 
     /* set context into xport handle */
     auth_xport_set_context(xport_hdl, serial_inst);
@@ -295,9 +384,20 @@ int auth_xp_serial_init(const auth_xport_hdl_t xport_hdl, uint32_t flags, void *
     auth_xport_set_sendfunc(xport_hdl, auth_xp_serial_send);
 
     /* enable receiving */
+
     uint8_t *rx_buf = serial_get_xp_buffer(SERIAL_LINK_MTU);
     serial_set_xp_buffer_setreq_len(rx_buf, SERIAL_LINK_MTU);
-    uart_rx_enable(serial_inst->serial_dev, rx_buf, 1 /*SERIAL_LINK_MTU*/, 5000 /* make define */);
+    //uart_rx_enable(serial_inst->serial_dev, rx_buf, 1 /*SERIAL_LINK_MTU*/, 5000 /* make define */);
+
+    uart_irq_rx_enable(serial_inst->uart_dev);
+
+    /* enable error irq */
+    uart_irq_err_enable(serial_inst->uart_dev);
+
+    //uint8_t *rx_buf = serial_get_xp_buffer(SERIAL_LINK_MTU);
+   // serial_set_xp_buffer_setreq_len(rx_buf, SERIAL_LINK_MTU);
+    //uart_rx_enable(serial_inst->serial_dev, rx_buf, SERIAL_LINK_MTU, 2000 /* make define */);
+
 
     return AUTH_SUCCESS;
 }

@@ -87,7 +87,7 @@ static int config_uart(void)
     }
 
     /* If successful,then init lower transport layer. */
-    xp_params.serial_dev = uart_dev;
+    xp_params.uart_dev = uart_dev;
     //xp_params.payload_size = 2048;
 
     err = auth_xport_init(&auth_conn_serial.xport_hdl,  0, &xp_params);

@@ -271,7 +271,7 @@ int auth_xp_bt_get_max_payload(const auth_xport_hdl_t xporthdl);
 
 struct auth_xp_serial_params
 {
-    struct device *serial_dev; /* pointer to Uart instance */
+    struct device *uart_dev; /* pointer to Uart instance */
     uint16_t payload_size;
 };
 
