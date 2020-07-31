@@ -62,9 +62,13 @@ static struct serial_xp_buffer serial_xp_bufs[NUM_BUFFERS] = {
 
 static struct serial_xp_buffer *serial_xp_buffer_info(const uint8_t *buf)
 {
+    if(buf == NULL) {
+        return NULL;
+    }
+
     /* get pointer to containing struct*/
     struct serial_xp_buffer *xp_buf =
-           (struct serial_xp_buffer *)CONTAINER_OF(buf, struct serial_xp_buffer, buffer);
+           (struct serial_xp_buffer *)CONTAINER_OF(buf, struct serial_xp_buffer, in_use);
 
     return xp_buf;
 }
@@ -135,6 +139,7 @@ static void auth_xp_serial_free_instance(struct serial_xp_instance *serial_inst)
     }
 }
 
+
 static void auth_xp_uart_cb(struct uart_event *evt, void *user_data)
 {
     int err;
@@ -144,6 +149,13 @@ static void auth_xp_uart_cb(struct uart_event *evt, void *user_data)
 
         case UART_TX_DONE:
         {
+            /* callback with NULL buffer */
+            if(evt->data.tx.buf == NULL) {
+                break;
+            }
+
+            LOG_ERR("TX Done");
+
             struct serial_xp_buffer *xp_buffer = serial_xp_buffer_info(evt->data.tx.buf);
 
             /* if bytes remaining to be send, resend remaining bytes */
@@ -158,22 +170,32 @@ static void auth_xp_uart_cb(struct uart_event *evt, void *user_data)
 
         case UART_TX_ABORTED:
         {
-            /* free tx buffer */
+            LOG_ERR("TX Aborted");
+            /* free rx buffer */
             serial_free_xp_buffer(evt->data.tx.buf);
             break;
         }
 
         case UART_RX_RDY:
         {
+
+            // DAG DEBUG BEG
+            uint8_t *rx_byte = evt->data.rx.buf + evt->data.rx.offset;
+            LOG_ERR("RX Ready, count: %d, byte: 0x%x", evt->data.rx.len, *rx_byte);
+
+
             /* NOTE: Might have to change if receiver byte at a time. */
-            err = auth_xport_put_recv_bytes(serial_inst->xport_hdl,
-                                            evt->data.rx.buf + evt->data.rx.offset,
-                                            evt->data.rx.len);
+            //err = auth_xport_put_recv_bytes(serial_inst->xport_hdl,
+            //                                evt->data.rx.buf + evt->data.rx.offset,
+             //                               evt->data.rx.len);
+            // DAG DEBUG END
             break;
         }
 
         case UART_RX_BUF_REQUEST:
         {
+            LOG_ERR("Buffer request");
+
             uint8_t *newbuf = serial_get_xp_buffer(SERIAL_LINK_MTU);
             serial_set_xp_buffer_setreq_len(newbuf, SERIAL_LINK_MTU);
 
@@ -188,6 +210,7 @@ static void auth_xp_uart_cb(struct uart_event *evt, void *user_data)
 
         case UART_RX_BUF_RELEASED:
         {
+            LOG_ERR("RX Buffer released");
             serial_free_xp_buffer(evt->data.rx_buf.buf);
             break;
         }
@@ -195,11 +218,13 @@ static void auth_xp_uart_cb(struct uart_event *evt, void *user_data)
         case UART_RX_DISABLED:
         {
             /* restart RX?? */
+            LOG_ERR("RX Disabled");
             break;
         }
 
         case UART_RX_STOPPED:
         {
+            LOG_ERR("RX stopped, reason: 0x%x", evt->data.rx_stop.reason);
             /* free RX buffers */
             serial_free_xp_buffer(evt->data.rx_stop.data.buf);
             break;
@@ -258,6 +283,7 @@ int auth_xp_serial_init(const auth_xport_hdl_t xport_hdl, uint32_t flags, void *
     }
 
     serial_inst->serial_dev = serial_param->serial_dev;
+    serial_inst->xport_hdl = xport_hdl;
     //  serial_param->payload_size  ??
 
     /* set serial event callback */
@@ -271,7 +297,7 @@ int auth_xp_serial_init(const auth_xport_hdl_t xport_hdl, uint32_t flags, void *
     /* enable receiving */
     uint8_t *rx_buf = serial_get_xp_buffer(SERIAL_LINK_MTU);
     serial_set_xp_buffer_setreq_len(rx_buf, SERIAL_LINK_MTU);
-    uart_rx_enable(serial_inst->serial_dev, rx_buf, SERIAL_LINK_MTU, 2000 /* make define */);
+    uart_rx_enable(serial_inst->serial_dev, rx_buf, 1 /*SERIAL_LINK_MTU*/, 5000 /* make define */);
 
     return AUTH_SUCCESS;
 }
