@@ -29,7 +29,7 @@ LOG_MODULE_REGISTER(auth_serial_client, CONFIG_AUTH_LOG_LEVEL);
 static struct device *uart_dev;
 
 static struct uart_config uart_cfg = {
-    .baudrate = 115200,
+    .baudrate = 9600,
     .parity = UART_CFG_PARITY_NONE,
     .stop_bits = UART_CFG_STOP_BITS_1,
     .data_bits = UART_CFG_DATA_BITS_8,
@@ -87,7 +87,7 @@ static int config_uart(void)
     }
 
     /* If successful,then init lower transport layer. */
-    xp_params.serial_dev = uart_dev;
+    xp_params.uart_dev = uart_dev;
     //xp_params.payload_size = 2048;
 
     err = auth_xport_init(&auth_conn_serial.xport_hdl,  0, &xp_params);
