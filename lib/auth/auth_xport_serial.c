@@ -154,6 +154,7 @@ static void auth_xp_serial_free_instance(struct serial_xp_instance *serial_inst)
 static void auth_xp_serial_irq_cb(void *user_data)
 {
     int num_bytes = 0;
+    int total_cnt = 0;
     uint8_t tempbuf[100];
     enum uart_rx_stop_reason rx_stop;
     struct serial_xp_instance *xp_inst = (struct serial_xp_instance *) user_data;
@@ -178,10 +179,12 @@ static void auth_xp_serial_irq_cb(void *user_data)
     while(uart_irq_rx_ready(uart_dev)) {
 
         num_bytes = uart_fifo_read(uart_dev, tempbuf, sizeof(tempbuf));
-        LOG_INF("Read %d bytes.", num_bytes);
-
+        total_cnt += num_bytes;
+        
         /* fill buffer */
     }
+
+    LOG_ERR("Read %d bytes", total_cnt);
 
     /* put data into rx buffer */
     /* NOTE: this grabs a lock, should not do this in an irq, start
