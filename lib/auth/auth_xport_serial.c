@@ -35,9 +35,10 @@ struct serial_xp_instance
     struct device *uart_dev;
     auth_xport_hdl_t xport_hdl;
 
-    /* dummy buffer */
-    uint8_t test_data[30];
-    uint32_t tx_bytes;   // num bytes to send
+    /* current transmit buffer */
+    size_t tx_bytes;
+    uint8_t *tx_buf;
+
 };
 
 /* Buffer used for TX/RX */
@@ -190,23 +191,34 @@ static void auth_xp_serial_irq_cb(void *user_data)
     /* NOTE: this grabs a lock, should not do this in an irq, start
      * work item to fill RX buffer */
 
-    /* any pending TX buffers ? */
+    /* Any data ready to send? */
     if(xp_inst->tx_bytes == 0) {
         return;
     }
 
+    total_cnt = 0;
     while(uart_irq_tx_ready(uart_dev)) {
 
-        num_bytes = uart_fifo_fill(uart_dev, xp_inst->test_data, xp_inst->tx_bytes);
+        num_bytes = uart_fifo_fill(uart_dev, xp_inst->tx_buf, xp_inst->tx_bytes);
 
         /* check return can this be an error? */
         xp_inst->tx_bytes -= num_bytes;
 
-
+        total_cnt += num_bytes;
 
         /* if not more data to send, then break */
+        if(xp_inst->tx_bytes == 0) {
+            break;
+        }
     }
 
+    /* we're done sending */
+    if(xp_inst->tx_bytes == 0) {
+        serial_free_xp_buffer(xp_inst->tx_buf);
+        xp_inst->tx_buf = NULL;
+    }
+
+    //LOG_ERR("Send %d bytes", total_cnt);
 
 }
 
@@ -323,27 +335,31 @@ static int auth_xp_serial_send(auth_xport_hdl_t xport_hdl, const uint8_t *data, 
 
 
     /* is there a pending TX operation?  If so return busy error */
-    //TODO: Check atomic vars in serial_inst
+    if(serial_inst->tx_buf != NULL) {
+        LOG_ERR("TX operation in process.");
+        return -1;
+    }
 
 
     /* get free buffer for tx */
-    uint8_t *tx_buf = serial_get_xp_buffer(len);
+    serial_inst->tx_buf = serial_get_xp_buffer(len);
 
-    if(tx_buf == NULL) {
+    if(serial_inst->tx_buf == NULL) {
         LOG_ERR("No free TX buffer.");
         return AUTH_ERROR_NO_RESOURCE;
     }
 
     /* set the number of bytes requested to send */
-    serial_set_xp_buffer_setreq_len(tx_buf, len);
+    serial_set_xp_buffer_setreq_len(serial_inst->tx_buf, len);
 
     /* fill buffer, set as _in use */
-    memcpy(tx_buf, data, len);
+    memcpy(serial_inst->tx_buf, data, len);
+    serial_inst->tx_bytes = len;
 
 // DAG DEBUG BEG
-    LOG_ERR("***Setting buffer");
-    memset(serial_inst->test_data, 'A', sizeof(serial_inst->test_data));
-    serial_inst->tx_bytes = sizeof(serial_inst->test_data);
+    LOG_ERR("***Setting buffer w/test data");
+    memset(serial_inst->tx_buf, 'A', sizeof(serial_inst->tx_buf));
+    serial_inst->tx_bytes = sizeof(serial_inst->tx_buf);
 // DAG DEBUG END
 
     //int err = uart_tx(serial_inst->uart_dev, tx_buf, len, TX_TIMEOUT_MSEC);

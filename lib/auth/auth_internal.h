@@ -17,6 +17,21 @@
 // DAG DEBUG END
 
 
+#define AUTH_RING_BUFLEN         (200u)
+
+/**
+ * Simple ring buffer
+ */
+struct auth_ringbuf {
+    /* rx buffer */
+    uint8_t buf[AUTH_RING_BUFLEN];
+    struct k_sem rx_sem;
+    atomic_t head_idx;
+    atomic_t tail_idx;
+    atomic_t did_overflow;
+};
+
+
 
 /**
  * Starts the authentication thread.
@@ -165,106 +180,16 @@ int auth_server_tx(struct authenticate_conn *conn, const unsigned char *data, si
 int auth_sever_rx(struct authenticate_conn *conn, uint8_t *buf, size_t len);
 
 
-/**
- * @brief IO buffer routines used to manage the circular receive buffer for
- *        the Central and Peripheral.
- */
+void auth_ringbuf_init(struct auth_ringbuf *ringbuf);
 
 
-#if 0
-/**
- * Initializes a IO buffer.
- *
- * @param iobuf   Pointer to IO buffer struct.
- *
- * @return   0 on success, negative on error.
- */
-int auth_buffer_init(struct auth_io_buffer *iobuf);
+void auth_ringbuf_put_byte(struct auth_ringbuf *ringbuf, uint8_t one_byte);
 
-/**
- *  Puts data into the buffer.
- *
- * @param iobuf        Pointer to IO buffer struct.
- * @param in_buf       Bytes to put.
- * @param num_bytes    Number of bytes to put.
- *
- * @return  Number of bytes put into the buffer, can be less than request.
- *          On error, negative number.
- */
-int auth_buffer_put(struct auth_io_buffer *iobuf, const uint8_t *in_buf,  int num_bytes);
+bool auth_ringbuf_get_byte(struct auth_ringbuf *ringbuf, uint8_t *one_byte);
 
-/**
- *  Gets bytes from the buffer, Non-Blocking
- *
- * @param iobuf       Pointer to IO buffer struct.
- * @param out_buf     Buffer to copy bytes into.
- * @param num_bytes   Number of bytes requested.
- *
- * @return  Number of bytes copied, can be less than requested.
- *          Negative number on error.
- */
-int auth_buffer_get(struct auth_io_buffer *iobuf, uint8_t *out_buf, int num_bytes);
+bool auth_ringbuf_overflow(struct auth_ringbuf *ringbuf);
 
-/**
- * Gets number of bytes from the buffer, optionally waiting.
- *
- * @param iobuf      Pointer to IO buffer struct.
- * @param out_buf    Buffer to copy bytes into.
- * @param num_bytes  Number of bytes requested.
- * @param waitmsec   Wait time in msecs for data, K_FOREVER or K_NO_WAIT.
- *
- * @return Number of bytes copied. -EAGAIN if timed out.
- */
-int auth_buffer_get_wait(struct auth_io_buffer *iobuf, uint8_t *out_buf, int num_bytes, int waitmsec);
-
-/**
- * Return the number of bytes in the buffer.
- *
- * @param iobuf  Pointer to IO buffer struct.
- *
- * @return  Number of bytes or error.
- */
-int auth_buffer_bytecount(struct auth_io_buffer *iobuf);
-
-/**
- * Get number of bytes in buffer, wait number of msecs if no bytes are available.
- *
- * @param iobuf      Pointer to IO buffer struct.
- * @param waitmsec   Number of milliseconds to wait until bytes arrive in buffer.
- *
- * @return  Number of bytes, timeout, or error
- */
-int auth_buffer_bytecount_wait(struct auth_io_buffer *iobuf, uint32_t waitmsec);
-
-
-/**
- * Return the number of available bytes to write into buffer.
- *
- * @param iobuf   Pointer to IO buffer struct.
- *
- * @return       Number of bytes avail to use.
- */
-int auth_buffer_avail_bytes(struct auth_io_buffer *iobuf);
-
-/**
- * Determines if the buffer is full;
- *
- * @param iobuf  Pointer to IO buffer struct.
- *
- * @return  true if full, else fals.
- */
-bool auth_buffer_isfull(struct auth_io_buffer *iobuf);
-
-/**
- * Clears the buffer contents.
- *
- * @param iobuf  Pointer to IO buffer struct.
- *
- * @return   0 on success, else negative on error.
- */
-int auth_buffer_clear(struct auth_io_buffer *iobuf);
-
-#endif 
+void auth_ringbuf_reset(struct auth_ringbuf *ringbuf);
 
 
 

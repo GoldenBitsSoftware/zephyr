@@ -20,7 +20,7 @@
 LOG_MODULE_REGISTER(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 
 #include <auth/auth_lib.h>
-//#include "auth_internal.h"
+#include "auth_internal.h"
 
 
 #define HANDSHAKE_THRD_STACK_SIZE       4096
@@ -257,5 +257,72 @@ void auth_lib_set_tls_certs(struct authenticate_conn *auth_conn, struct auth_cer
     auth_conn->cert_cont = certs;
 }
 #endif
+
+/* ============ Simple ring buffer routines */
+
+void auth_ringbuf_init(struct auth_ringbuf *ringbuf)
+{
+    k_sem_init(&ringbuf->rx_sem, 0, AUTH_RING_BUFLEN);
+
+    auth_ringbuf_reset(ringbuf);
+}
+
+void auth_ringbuf_reset(struct auth_ringbuf *ringbuf)
+{
+    atomic_set(&ringbuf->head_idx, 0);
+    atomic_set(&ringbuf->did_overflow, 0);
+    atomic_set(&ringbuf->tail_idx, 0);
+
+    k_sem_reset(&ringbuf->rx_sem);
+}
+
+
+void auth_ringbuf_put_byte(struct auth_ringbuf *ringbuf, uint8_t one_byte)
+{
+    atomic_val_t old_idx = atomic_inc(&ringbuf->head_idx);
+    ringbuf->buf[old_idx] = one_byte;
+
+    /* check if head index beyond fx buffer */
+    atomic_cas(&ringbuf->head_idx, AUTH_RING_BUFLEN, 0);
+
+    /* did an overflow occur? */
+    if (old_idx == atomic_get(&ringbuf->tail_idx)) {
+        atomic_set(&ringbuf->did_overflow, 1);
+    }
+
+    /* inc semaphore */
+    k_sem_give(&ringbuf->rx_sem);
+}
+
+/**
+ * Returns true if more bytes avail
+ *
+ * @param ringbuf
+ * @param byte
+ * @return
+ */
+bool auth_ringbuf_get_byte(struct auth_ringbuf *ringbuf, uint8_t *one_byte)
+{
+    /* inc semaphore */
+    k_sem_take(&ringbuf->rx_sem, K_MSEC(2000));
+
+    if (atomic_get(&ringbuf->head_idx) == atomic_get(&ringbuf->tail_idx)) {
+        return false;
+    }
+
+    *one_byte = ringbuf->buf[atomic_inc(&ringbuf->tail_idx)];
+
+    atomic_cas(&ringbuf->tail_idx, AUTH_RING_BUFLEN, 0);
+
+    return true;
+}
+
+
+bool auth_ringbuf_overflow(struct auth_ringbuf *ringbuf)
+{
+    return atomic_get(&ringbuf->did_overflow) == 0 ? true : false;
+}
+
+
 
 
