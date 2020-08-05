@@ -8,7 +8,7 @@
 #define ZEPHYR_INCLUDE_AUTH_INTERNAL_H_
 
 /**
- * @brief  Timeout in Msec when waiting for GATT or L2CAP read/write to complete.
+ * @brief  Timeout in Msec when waiting for GATT read/write to complete.
  */
 
 // DAG DEBUG BEG

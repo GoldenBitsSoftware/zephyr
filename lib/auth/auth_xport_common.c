@@ -5,6 +5,7 @@
  */
 
 #include <zephyr/types.h>
+#include <sys/byteorder.h>
 #include <stddef.h>
 #include <string.h>
 #include <errno.h>
@@ -20,6 +21,13 @@ LOG_MODULE_DECLARE(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 
 
 #define XPORT_IOBUF_LEN      (4096u)
+
+/*
+ * When sending a frame, use Big Endian or Network byte ordering
+ */
+
+#define XPORT_HOST_TO_NET_16(val)     sys_cpu_to_be16(val)
+#define XPORT_NET_TO_HOST_16(val)     sys_be16_to_cpu(val)
 
 /**
  * @brief Circular buffer used to save received data.
@@ -495,6 +503,10 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
         memcpy(frame.frame_payload, data, payload_bytes);
         frame.hdr.payload_len = payload_bytes;
 
+        /* convert header to Big Endian, network byte order */
+        frame.hdr.sync_flags = sys_cpu_to_be16(frame.hdr.sync_flags);
+        frame.hdr.payload_len = sys_cpu_to_be16(frame.hdr.payload_len);
+
         /* send frame */
         send_ret = auth_xport_internal_send(xporthdl, (const uint8_t*)&frame, frame_bytes);
 
@@ -558,6 +570,7 @@ int auth_xport_getnum_send_queued_bytes(const auth_xport_hdl_t xporthdl)
 bool auth_xport_fullframe(const uint8_t *buffer, uint16_t buflen, uint16_t *frame_beg_offset, uint16_t *frame_byte_cnt)
 {
     uint16_t cur_offset;
+    uint16_t temp_payload_len;
     struct auth_xport_frame_hdr *frm_hdr;
 
     /* quick check */
@@ -586,10 +599,17 @@ bool auth_xport_fullframe(const uint8_t *buffer, uint16_t buflen, uint16_t *fram
     /* should have a full header, check frame len */
     frm_hdr = (struct auth_xport_frame_hdr *)buffer;
 
+    /* convert from be to cpu */
+    temp_payload_len = sys_be16_to_cpu(frm_hdr->payload_len);
+
     if(frm_hdr->payload_len > (buflen - cur_offset)) {
         /* not enough bytes for a full frame */
         return false;
     }
+
+    /* Put header vars into CPU byte order. */
+    frm_hdr->sync_flags = sys_be16_to_cpu(frm_hdr->sync_flags);
+    frm_hdr->payload_len = sys_be16_to_cpu(frm_hdr->payload_len);
 
     /* Have a full frame*/
     *frame_beg_offset = cur_offset;

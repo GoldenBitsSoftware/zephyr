@@ -226,7 +226,7 @@ static void auth_xp_serial_irq_cb(void *user_data)
     }
 
     /* read any chars first */
-    while(uart_irq_rx_ready(uart_dev) && xp_inst->rx_buf !=NULL) {
+    while(uart_irq_rx_ready(uart_dev) && xp_inst->rx_buf != NULL) {
 
         num_bytes = uart_fifo_read(uart_dev, xp_inst->rx_buf + xp_inst->rx_curr_cnt,
                                    SERIAL_XP_BUFFER_LEN - xp_inst->rx_curr_cnt);
@@ -235,7 +235,7 @@ static void auth_xp_serial_irq_cb(void *user_data)
         xp_inst->rx_curr_cnt += num_bytes;
 
         /* Is there a full frame? */
-        if(auth_xport_fullframe(xp_inst->rx_buf, SERIAL_XP_BUFFER_LEN,
+        if(auth_xport_fullframe(xp_inst->rx_buf, xp_inst->rx_curr_cnt,
                                 &frame_beg_offset, &frame_bytes)) {
 
             /* A full frame is present in the input buffer starting
@@ -308,7 +308,7 @@ static void auth_xp_serial_irq_cb(void *user_data)
     total_cnt = 0;
     while(uart_irq_tx_ready(uart_dev) && xp_inst->tx_buf != NULL) {
 
-        num_bytes = uart_fifo_fill(uart_dev, xp_inst->tx_buf, xp_inst->tx_bytes);
+        num_bytes = uart_fifo_fill(uart_dev, xp_inst->tx_buf + total_cnt, xp_inst->tx_bytes);
 
         /* check return can this be an error? */
         xp_inst->tx_bytes -= num_bytes;
