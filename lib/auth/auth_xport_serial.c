@@ -171,7 +171,7 @@ static void auth_xp_serial_free_instance(struct serial_xp_instance *serial_inst)
 static void serial_xp_rxbuf_work_func(struct k_work *work_item)
 {
     struct serial_xp_rxframe_workitem *wrk;
-    int err;
+    int num_bytes;
 
     /* put buffer into transport receive queue */
     wrk = (struct serial_xp_rxframe_workitem *)CONTAINER_OF(work_item, struct serial_xp_rxframe_workitem, work);
@@ -182,11 +182,11 @@ static void serial_xp_rxbuf_work_func(struct k_work *work_item)
     }
 
     /* put frame into receive queue */
-    err = auth_xport_put_recv_bytes(wrk->xport_hdl, wrk->buffer + wrk->rx_offset,
+    num_bytes = auth_xport_put_recv_bytes(wrk->xport_hdl, wrk->buffer + wrk->rx_offset,
                                     wrk->rx_len);
 
-    if(err) {
-        LOG_ERR("Failed to set frame into receive queue.");
+    if(num_bytes <= 0) {
+        LOG_ERR("Failed to set frame into receive queue, err: %d.", num_bytes);
     }
 
     /* free buffer */
@@ -204,7 +204,7 @@ static void auth_xp_serial_irq_cb(void *user_data)
     uint16_t frame_beg_offset;
     uint16_t frame_bytes;
     uint16_t remaining_buffer_bytes;
-    int total_cnt = 0;
+    static int total_cnt = 0;
     uint8_t *new_rxbuf;
     enum uart_rx_stop_reason rx_stop;
     struct serial_xp_instance *xp_inst = (struct serial_xp_instance *) user_data;
@@ -294,7 +294,7 @@ static void auth_xp_serial_irq_cb(void *user_data)
 
     }
 
-    LOG_ERR("Read %d bytes", total_cnt);
+   // LOG_ERR("Read %d bytes", total_cnt);
 
     /* put data into rx buffer */
     /* NOTE: this grabs a lock, should not do this in an irq, start

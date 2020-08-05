@@ -602,7 +602,7 @@ bool auth_xport_fullframe(const uint8_t *buffer, uint16_t buflen, uint16_t *fram
     /* convert from be to cpu */
     temp_payload_len = sys_be16_to_cpu(frm_hdr->payload_len);
 
-    if(frm_hdr->payload_len > (buflen - cur_offset)) {
+    if(temp_payload_len > (buflen - cur_offset)) {
         /* not enough bytes for a full frame */
         return false;
     }
