@@ -40,7 +40,8 @@ struct serial_xp_instance
 
     /* Current transmit buffer */
     uint8_t *tx_buf;
-    uint16_t tx_bytes;
+    uint16_t tx_bytes;  /* number of bytes to send */
+    uint16_t curr_tx_cnt;  /* current tx send count */
 
     /* Current Rx buffer */
     uint8_t *rx_buf;
@@ -308,10 +309,11 @@ static void auth_xp_serial_irq_cb(void *user_data)
     total_cnt = 0;
     while(uart_irq_tx_ready(uart_dev) && xp_inst->tx_buf != NULL) {
 
-        num_bytes = uart_fifo_fill(uart_dev, xp_inst->tx_buf + total_cnt, xp_inst->tx_bytes);
+        num_bytes = uart_fifo_fill(uart_dev, xp_inst->tx_buf + xp_inst->curr_tx_cnt, xp_inst->tx_bytes);
 
         /* check return can this be an error? */
         xp_inst->tx_bytes -= num_bytes;
+        xp_inst->curr_tx_cnt += num_bytes;
 
         total_cnt += num_bytes;
 
@@ -325,13 +327,12 @@ static void auth_xp_serial_irq_cb(void *user_data)
     if(xp_inst->tx_bytes == 0) {
         serial_free_xp_buffer(xp_inst->tx_buf);
         xp_inst->tx_buf = NULL;
+        xp_inst->curr_tx_cnt = 0;
+        LOG_ERR("Send tx buffer.");
     }
 
     //LOG_ERR("Send %d bytes", total_cnt);
-
 }
-
-
 
 
 
@@ -344,33 +345,33 @@ static int auth_xp_serial_send(auth_xport_hdl_t xport_hdl, const uint8_t *data, 
 
     struct serial_xp_instance *serial_inst = (struct serial_xp_instance *)auth_xport_get_context(xport_hdl);
 
-
     /* is there a pending TX operation?  If so return busy error */
     if(serial_inst->tx_buf != NULL) {
         LOG_ERR("TX operation in process.");
         return -1;
     }
 
-
     /* get free buffer for tx */
     serial_inst->tx_buf = serial_get_xp_buffer(len);
 
     if(serial_inst->tx_buf == NULL) {
         LOG_ERR("No free TX buffer.");
+        serial_inst->tx_bytes = 0;
+        serial_inst->curr_tx_cnt = 0;
         return AUTH_ERROR_NO_RESOURCE;
     }
-
 
     /* fill buffer, set as _in use */
     memcpy(serial_inst->tx_buf, data, len);
     serial_inst->tx_bytes = len;
+    serial_inst->curr_tx_cnt = 0;
 
     /* should kick of an interrupt */
     uart_irq_tx_enable(serial_inst->uart_dev);
 
     LOG_INF("Started TX operation");
 
-    return 0;
+    return len;
 }
 
 /**
@@ -400,10 +401,16 @@ int auth_xp_serial_init(const auth_xport_hdl_t xport_hdl, uint32_t flags, void *
 
     auth_xport_set_sendfunc(xport_hdl, auth_xp_serial_send);
 
+    /* reset tx vars */
+    serial_inst->tx_buf = NULL;
+    serial_inst->tx_bytes = 0;
+    serial_inst->curr_tx_cnt = 0;
+
     /* get rx buffer */
     serial_inst->rx_buf = serial_get_xp_buffer(SERIAL_XP_BUFFER_LEN);
     serial_inst->rx_curr_cnt = 0;
 
+    /* enable rx interrupts */
     uart_irq_rx_enable(serial_inst->uart_dev);
 
     /* enable error irq */
