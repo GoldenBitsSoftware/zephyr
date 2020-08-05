@@ -146,17 +146,31 @@ int auth_xport_recv(const auth_xport_hdl_t xporthdl, uint8_t *buff, uint32_t buf
 int auth_xport_getnum_send_queued_bytes(const auth_xport_hdl_t xporthdl);
 
 /**
- * Used by lower transport to put received bytes into recv queue.  The upper
- * layer auth code reads from this queue.
+ * Used by lower transport to put received bytes into recv queue. Handle framing and
+ * puts full message into receive queue. Handle reassembly of message fragments.
  *
  * @param xporthdl  Transport handle.
- * @param buff      Pointer to buffer to queue.
- * @param buflen    Number of bytes to queue.
+ * @param buff      Pointer to one frame.
+ * @param buflen    Number of bytes in frame
  *
  * @return The number of bytes queued, can be less than requested.
  *         On error, negative value is returned.
  */
 int auth_xport_put_recv_bytes(const auth_xport_hdl_t xporthdl, const uint8_t *buff, size_t buflen);
+
+
+/**
+ * Scans buffer to determine if frame is present.
+ *
+ * @param buffer            Buffer to scan.
+ * @param buflen            Buffer length.
+ * @param frame_beg_offset  Offset from buffer begin where frame starts.
+ * @param frame_byte_cnt    Number of bytes in this frame.
+ *
+ * @return  true if full frame found, else false.
+ */
+bool auth_xport_fullframe(const uint8_t *buffer, uint16_t buflen, uint16_t *frame_beg_offset,
+                          uint16_t *frame_byte_cnt);
 
 
 /**

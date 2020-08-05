@@ -20,7 +20,10 @@
 #define AUTH_RING_BUFLEN         (200u)
 
 /**
- * Simple ring buffer
+ * Simple ring buffer used between UART ISR and the transport input
+ * queue.  The transport receive queue uses a mutex to control access.
+ * Can not hold a mutex in an ISR, the solution is to use a simple queue
+ * using atomic vars.
  */
 struct auth_ringbuf {
     /* rx buffer */

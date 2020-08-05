@@ -260,6 +260,12 @@ void auth_lib_set_tls_certs(struct authenticate_conn *auth_conn, struct auth_cer
 
 /* ============ Simple ring buffer routines */
 
+/**
+ * @note:  The ring buffer uses a simple head/tail index and
+ * puts/gets one byte at a time.  This enables the use of atomic vars
+ * which can be use safely in an ISR.  For UART input, the received bytes
+ * are put into this ring buffer, a separate kernel thread reads
+ */
 void auth_ringbuf_init(struct auth_ringbuf *ringbuf)
 {
     k_sem_init(&ringbuf->rx_sem, 0, AUTH_RING_BUFLEN);
@@ -279,14 +285,15 @@ void auth_ringbuf_reset(struct auth_ringbuf *ringbuf)
 
 void auth_ringbuf_put_byte(struct auth_ringbuf *ringbuf, uint8_t one_byte)
 {
-    atomic_val_t old_idx = atomic_inc(&ringbuf->head_idx);
-    ringbuf->buf[old_idx] = one_byte;
+    ringbuf->buf[atomic_inc(&ringbuf->head_idx)] = one_byte;
 
     /* check if head index beyond fx buffer */
     atomic_cas(&ringbuf->head_idx, AUTH_RING_BUFLEN, 0);
 
-    /* did an overflow occur? */
-    if (old_idx == atomic_get(&ringbuf->tail_idx)) {
+    /* Did an overflow occur? At this point we haven't put a byte into
+     * the same place as the tail index (causing the overflow) but the buffer is
+     * full enough that we will set the overflow flag. This k*/
+    if (atomic_get(&ringbuf->head_idx) == atomic_get(&ringbuf->tail_idx)) {
         atomic_set(&ringbuf->did_overflow, 1);
     }
 

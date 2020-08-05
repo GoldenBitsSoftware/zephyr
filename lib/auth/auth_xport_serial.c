@@ -16,6 +16,8 @@
 #include <auth/auth_lib.h>
 #include <auth/auth_xport.h>
 
+#include "auth_internal.h"
+
 
 #define LOG_LEVEL CONFIG_AUTH_LOGLEVEL
 #include <logging/log.h>
@@ -23,7 +25,8 @@ LOG_MODULE_REGISTER(auth_serial_xport, CONFIG_AUTH_LOG_LEVEL);
 
 
 #define SERIAL_LINK_MTU             (1024u)
-#define NUM_BUFFERS                 (4u)
+#define SERIAL_XP_BUFFER_LEN        SERIAL_LINK_MTU
+#define NUM_BUFFERS                 (6u)
 #define TX_TIMEOUT_MSEC             (2000u)
 
 #define MAX_SERIAL_INSTANCES        (3u)
@@ -35,19 +38,39 @@ struct serial_xp_instance
     struct device *uart_dev;
     auth_xport_hdl_t xport_hdl;
 
-    /* current transmit buffer */
-    size_t tx_bytes;
+    /* Current transmit buffer */
     uint8_t *tx_buf;
+    uint16_t tx_bytes;
 
+    /* Current Rx buffer */
+    uint8_t *rx_buf;
+    uint16_t rx_curr_cnt;
+
+    /* receive thread info */
+    k_tid_t serial_rx_tid;
+    struct k_thread serial_xp_rx_thrd_data;
+
+};
+
+/**
+ * Work queue item, used to queue frame onto work queue.  The purpose
+ * is to avoid writing to the transport input queue in an ISR context
+ */
+struct serial_xp_rxframe_workitem {
+    struct k_work work;
+    uint8_t *buffer;     /* buffer beg */
+    uint16_t rx_offset;  /* Offset into buffer to frame */
+    uint16_t rx_len;     /* number of bytes in frame */
+    auth_xport_hdl_t xport_hdl;  /* trasport handle for this buffer */
 };
 
 /* Buffer used for TX/RX */
 struct serial_xp_buffer
 {
     bool in_use;
-    uint32_t num_bytes_req;  /* number tx/rx bytes requested */
     uint32_t bufidx;         /* Buffer index */
-    uint8_t buffer[SERIAL_LINK_MTU];
+    struct serial_xp_rxframe_workitem rx_work_item;  /* used to queue frame on work queue */
+    uint8_t buffer[SERIAL_XP_BUFFER_LEN];
 };
 
 
@@ -61,8 +84,11 @@ static struct serial_xp_buffer serial_xp_bufs[NUM_BUFFERS] = {
     { .in_use = false, .bufidx = 0 },
     { .in_use = false, .bufidx = 1 },
     { .in_use = false, .bufidx = 2 },
-    { .in_use = false, .bufidx = 3 }
+    { .in_use = false, .bufidx = 3 },
+    { .in_use = false, .bufidx = 4 },
+    { .in_use = false, .bufidx = 5 },
 };
+
 
 
 static struct serial_xp_buffer *serial_xp_buffer_info(const uint8_t *buf)
@@ -73,18 +99,11 @@ static struct serial_xp_buffer *serial_xp_buffer_info(const uint8_t *buf)
 
     /* get pointer to containing struct*/
     struct serial_xp_buffer *xp_buf =
-           (struct serial_xp_buffer *)CONTAINER_OF(buf, struct serial_xp_buffer, in_use);
+           (struct serial_xp_buffer *)CONTAINER_OF(buf, struct serial_xp_buffer, buffer);
 
     return xp_buf;
 }
 
-static void serial_set_xp_buffer_setreq_len(const uint8_t *buf, uint32_t len)
-{
-    if(buf != NULL) {
-        struct serial_xp_buffer *xp_buf = serial_xp_buffer_info(buf);
-        xp_buf->num_bytes_req = len;
-    }
-}
 
 static uint8_t *serial_get_xp_buffer(uint32_t buflen)
 {
@@ -98,6 +117,7 @@ static uint8_t *serial_get_xp_buffer(uint32_t buflen)
     /* check array of tx buffers */
     for(cnt = 0; cnt < NUM_BUFFERS; cnt++) {
         if(!atomic_test_and_set_bit(buffer_in_use, cnt)) {
+            serial_xp_bufs[cnt].in_use = true;
             return serial_xp_bufs[cnt].buffer;
         }
     }
@@ -110,6 +130,7 @@ static void serial_free_xp_buffer(const uint8_t *buffer)
     struct serial_xp_buffer *xp_buffer = serial_xp_buffer_info(buffer);
 
     if(xp_buffer != NULL) {
+        xp_buffer->in_use = false;
         atomic_clear_bit(buffer_in_use, xp_buffer->bufidx);
     }
 }
@@ -144,8 +165,33 @@ static void auth_xp_serial_free_instance(struct serial_xp_instance *serial_inst)
     }
 }
 
+/*
+ * Puts incoming frames into receive queue.
+ */
+static void serial_xp_rxbuf_work_func(struct k_work *work_item)
+{
+    struct serial_xp_rxframe_workitem *wrk;
+    int err;
 
-//static void auth_xp_uart_cb(struct uart_event *evt, void *user_data)
+    /* put buffer into transport receive queue */
+    wrk = (struct serial_xp_rxframe_workitem *)CONTAINER_OF(work_item, struct serial_xp_rxframe_workitem, work);
+
+    /* sanity check */
+    if(wrk == NULL) {
+        return;
+    }
+
+    /* put frame into receive queue */
+    err = auth_xport_put_recv_bytes(wrk->xport_hdl, wrk->buffer + wrk->rx_offset,
+                                    wrk->rx_len);
+
+    if(err) {
+        LOG_ERR("Failed to set frame into receive queue.");
+    }
+
+    /* free buffer */
+    serial_free_xp_buffer(wrk->buffer);
+}
 
 /**
  * For interrupt driven IO
@@ -154,9 +200,12 @@ static void auth_xp_serial_free_instance(struct serial_xp_instance *serial_inst)
  */
 static void auth_xp_serial_irq_cb(void *user_data)
 {
-    int num_bytes = 0;
+    int num_bytes;
+    uint16_t frame_beg_offset;
+    uint16_t frame_bytes;
+    uint16_t remaining_buffer_bytes;
     int total_cnt = 0;
-    uint8_t tempbuf[100];
+    uint8_t *new_rxbuf;
     enum uart_rx_stop_reason rx_stop;
     struct serial_xp_instance *xp_inst = (struct serial_xp_instance *) user_data;
     struct device *uart_dev = xp_inst->uart_dev;
@@ -177,12 +226,72 @@ static void auth_xp_serial_irq_cb(void *user_data)
     }
 
     /* read any chars first */
-    while(uart_irq_rx_ready(uart_dev)) {
+    while(uart_irq_rx_ready(uart_dev) && xp_inst->rx_buf !=NULL) {
 
-        num_bytes = uart_fifo_read(uart_dev, tempbuf, sizeof(tempbuf));
+        num_bytes = uart_fifo_read(uart_dev, xp_inst->rx_buf + xp_inst->rx_curr_cnt,
+                                   SERIAL_XP_BUFFER_LEN - xp_inst->rx_curr_cnt);
         total_cnt += num_bytes;
-        
-        /* fill buffer */
+
+        xp_inst->rx_curr_cnt += num_bytes;
+
+        /* Is there a full frame? */
+        if(auth_xport_fullframe(xp_inst->rx_buf, SERIAL_XP_BUFFER_LEN,
+                                &frame_beg_offset, &frame_bytes)) {
+
+            /* A full frame is present in the input buffer starting
+             * at frame_beg_offset and frame_bytes.  It's possible to
+             * have the beginning of a second frame following the first frame. */
+
+            /* get new rx buffer */
+            new_rxbuf = serial_get_xp_buffer(SERIAL_XP_BUFFER_LEN);
+
+            /* if there's garbage before the frame start,then skip.  If there
+             * is another frame or partial frame following then copy to new buffer.
+             * 'remaining_buffer_bytes' is the number of valid bytes after the current
+             * frame. */
+            remaining_buffer_bytes = xp_inst->rx_curr_cnt - frame_beg_offset - frame_bytes;
+
+            /* If frame bytes are less than the current, then the buffer contains bytes
+             * for the next fame */
+            if((remaining_buffer_bytes != 0) && (new_rxbuf != NULL)) {
+                /* copy extra bytes to new buffer */
+                memcpy(new_rxbuf, xp_inst->rx_buf + frame_beg_offset + frame_bytes,
+                       remaining_buffer_bytes);
+            }
+
+            /* Put frame onto work queue, will be added to the input queue, but
+             * most importantly, not in the context of an ISR. */
+            struct serial_xp_buffer *xp_buf = serial_xp_buffer_info(xp_inst->rx_buf);
+
+            xp_buf->rx_work_item.buffer = xp_inst->rx_buf;
+            xp_buf->rx_work_item.rx_offset = frame_beg_offset;
+            xp_buf->rx_work_item.rx_len = frame_bytes;
+            xp_buf->rx_work_item.xport_hdl = xp_inst->xport_hdl;
+
+            // TODO: Verify if there's a problem w/reinitialzing workitem
+            k_work_init(&xp_buf->rx_work_item.work, serial_xp_rxbuf_work_func);
+
+            k_work_submit(&xp_buf->rx_work_item.work);
+
+            /* now setup new RX frame */
+            if(new_rxbuf != NULL) {
+                xp_inst->rx_buf = new_rxbuf;
+                xp_inst->rx_curr_cnt = remaining_buffer_bytes;
+            }
+            else {
+                /* no free buffers */
+                xp_inst->rx_buf = NULL;
+                xp_inst->rx_curr_cnt = 0;
+            }
+        }
+
+        /* Is the current rx buffer completely full? If so, then there is
+         * no valid frame, just garbage.  Reset the current offset */
+        if(xp_inst->rx_curr_cnt == SERIAL_XP_BUFFER_LEN) {
+            LOG_ERR("Dropping %d bytes.",  xp_inst->rx_curr_cnt);
+            xp_inst->rx_curr_cnt = 0;
+        }
+
     }
 
     LOG_ERR("Read %d bytes", total_cnt);
@@ -197,7 +306,7 @@ static void auth_xp_serial_irq_cb(void *user_data)
     }
 
     total_cnt = 0;
-    while(uart_irq_tx_ready(uart_dev)) {
+    while(uart_irq_tx_ready(uart_dev) && xp_inst->tx_buf != NULL) {
 
         num_bytes = uart_fifo_fill(uart_dev, xp_inst->tx_buf, xp_inst->tx_bytes);
 
@@ -225,104 +334,6 @@ static void auth_xp_serial_irq_cb(void *user_data)
 
 
 
-#if 0
-static void __attribute__((optimize("O0"))) auth_xp_uart_cb(struct uart_event *evt, void *user_data)
-{
-    int err;
-    struct serial_xp_instance *serial_inst = (struct serial_xp_instance *)user_data;
-
-    switch(evt->type) {
-
-        case UART_TX_DONE:
-        {
-            /* callback with NULL buffer */
-            if(evt->data.tx.buf == NULL) {
-                break;
-            }
-
-            LOG_ERR("TX Done");
-
-            struct serial_xp_buffer *xp_buffer = serial_xp_buffer_info(evt->data.tx.buf);
-
-            /* if bytes remaining to be send, resend remaining bytes */
-            if(evt->data.tx.len != xp_buffer->num_bytes_req) {
-                // TODO:.....
-            } else {
-                serial_free_xp_buffer(evt->data.tx.buf);
-            }
-            break;
-        }
-
-
-        case UART_TX_ABORTED:
-        {
-            LOG_ERR("TX Aborted");
-            /* free rx buffer */
-            serial_free_xp_buffer(evt->data.tx.buf);
-            break;
-        }
-
-        case UART_RX_RDY:
-        {
-
-            // DAG DEBUG BEG
-            uint8_t *rx_byte = evt->data.rx.buf + evt->data.rx.offset;
-            LOG_ERR("RX Ready, count: %d, byte: 0x%x", evt->data.rx.len, *rx_byte);
-
-
-            /* NOTE: Might have to change if receiver byte at a time. */
-            //err = auth_xport_put_recv_bytes(serial_inst->xport_hdl,
-            //                                evt->data.rx.buf + evt->data.rx.offset,
-             //                               evt->data.rx.len);
-            // DAG DEBUG END
-            break;
-        }
-
-        case UART_RX_BUF_REQUEST:
-        {
-            LOG_ERR("Buffer request");
-
-            uint8_t *newbuf = serial_get_xp_buffer(SERIAL_LINK_MTU);
-            serial_set_xp_buffer_setreq_len(newbuf, SERIAL_LINK_MTU);
-
-            if(newbuf != NULL) {
-                uart_rx_buf_rsp(serial_inst->serial_dev, newbuf, SERIAL_LINK_MTU);
-            } else {
-                LOG_ERR("Failed to get free buffer.");
-            }
-
-            break;
-        }
-
-        case UART_RX_BUF_RELEASED:
-        {
-            LOG_ERR("RX Buffer released");
-            serial_free_xp_buffer(evt->data.rx_buf.buf);
-            break;
-        }
-
-        case UART_RX_DISABLED:
-        {
-            /* restart RX?? */
-            LOG_ERR("RX Disabled");
-            break;
-        }
-
-        case UART_RX_STOPPED:
-        {
-            LOG_ERR("RX stopped, reason: 0x%x", evt->data.rx_stop.reason);
-            /* free RX buffers */
-            serial_free_xp_buffer(evt->data.rx_stop.data.buf);
-            LOG_INF("Rx stopped.");
-            break;
-        }
-
-        default:
-            break;
-    }
-
-}
-#endif
 
 static int auth_xp_serial_send(auth_xport_hdl_t xport_hdl, const uint8_t *data, const size_t len)
 {
@@ -349,20 +360,10 @@ static int auth_xp_serial_send(auth_xport_hdl_t xport_hdl, const uint8_t *data, 
         return AUTH_ERROR_NO_RESOURCE;
     }
 
-    /* set the number of bytes requested to send */
-    serial_set_xp_buffer_setreq_len(serial_inst->tx_buf, len);
 
     /* fill buffer, set as _in use */
     memcpy(serial_inst->tx_buf, data, len);
     serial_inst->tx_bytes = len;
-
-// DAG DEBUG BEG
-    LOG_ERR("***Setting buffer w/test data");
-    memset(serial_inst->tx_buf, 'A', sizeof(serial_inst->tx_buf));
-    serial_inst->tx_bytes = sizeof(serial_inst->tx_buf);
-// DAG DEBUG END
-
-    //int err = uart_tx(serial_inst->uart_dev, tx_buf, len, TX_TIMEOUT_MSEC);
 
     /* should kick of an interrupt */
     uart_irq_tx_enable(serial_inst->uart_dev);
@@ -391,32 +392,22 @@ int auth_xp_serial_init(const auth_xport_hdl_t xport_hdl, uint32_t flags, void *
 
     //  serial_param->payload_size  ??
 
-    /* set serial event callback */
-    //uart_callback_set(serial_inst->serial_dev, auth_xp_uart_cb, serial_inst);
-
+    /* set serial irq callback */
     uart_irq_callback_user_data_set(serial_inst->uart_dev, auth_xp_serial_irq_cb, serial_inst);
-
 
     /* set context into xport handle */
     auth_xport_set_context(xport_hdl, serial_inst);
 
     auth_xport_set_sendfunc(xport_hdl, auth_xp_serial_send);
 
-    /* enable receiving */
-
-    uint8_t *rx_buf = serial_get_xp_buffer(SERIAL_LINK_MTU);
-    serial_set_xp_buffer_setreq_len(rx_buf, SERIAL_LINK_MTU);
-    //uart_rx_enable(serial_inst->serial_dev, rx_buf, 1 /*SERIAL_LINK_MTU*/, 5000 /* make define */);
+    /* get rx buffer */
+    serial_inst->rx_buf = serial_get_xp_buffer(SERIAL_XP_BUFFER_LEN);
+    serial_inst->rx_curr_cnt = 0;
 
     uart_irq_rx_enable(serial_inst->uart_dev);
 
     /* enable error irq */
     uart_irq_err_enable(serial_inst->uart_dev);
-
-    //uint8_t *rx_buf = serial_get_xp_buffer(SERIAL_LINK_MTU);
-   // serial_set_xp_buffer_setreq_len(rx_buf, SERIAL_LINK_MTU);
-    //uart_rx_enable(serial_inst->serial_dev, rx_buf, SERIAL_LINK_MTU, 2000 /* make define */);
-
 
     return AUTH_SUCCESS;
 }
