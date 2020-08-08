@@ -38,6 +38,16 @@ if AUTH_LIB
           3 INFO, write LOG_INF in addition to previous levels
           4 DEBUG, write LOG_DBG in addition to previous levels
 
+
+    config AUTH_FRAGMENT
+		bool "Fragment messages"
+		help
+		Used to break up messages into smaller chunks over the lower transport.
+		For example, a 60 byte message send over a Bluetooth link with a 23 byte
+		MTU would be broken into three fragments of sizes 23, 23, and 14.
+		If not set, then the messages are sent and received as a byte stream with
+		no message boundary.
+
     config BT_XPORT
 		bool "Bluetooth Transport"
 		help

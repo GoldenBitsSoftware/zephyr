@@ -18,16 +18,11 @@ LOG_MODULE_DECLARE(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 
 #include <auth/auth_lib.h>
 #include <auth/auth_xport.h>
+#include "auth_internal.h"
 
 
 #define XPORT_IOBUF_LEN      (4096u)
 
-/*
- * When sending a frame, use Big Endian or Network byte ordering
- */
-
-#define XPORT_HOST_TO_NET_16(val)     sys_cpu_to_be16(val)
-#define XPORT_NET_TO_HOST_16(val)     sys_be16_to_cpu(val)
 
 /**
  * @brief Circular buffer used to save received data.
@@ -44,34 +39,6 @@ struct auth_xport_io_buffer {
 };
 
 
-#define XPORT_FRAME_SIZE          256u  /* should be at least as large as the MTU */
-
-#define XPORT_FRAME_SYNC_BYTE_HIGH   (0xA5)
-#define XPORT_FRAME_SYNC_BYTE_LOW    (0x90)
-#define XPORT_FRAME_LOWBYTE_MASK     (0xF0)  /* bits 3-0 for flags */
-
-#define XPORT_FRAME_SYNC_BITS     ((XPORT_FRAME_SYNC_BYTE_HIGH << 8) | XPORT_FRAME_SYNC_BYTE_LOW)
-#define XPORT_FRAME_SYNC_MASK     0xFFF0
-#define XPORT_FRAME_BEGIN         0x1
-#define XPORT_FRAME_NEXT          0x2
-#define XPORT_FRAME_END           0x4
-
-#define XPORT_FRAME_HDR_BYTECNT     (sizeof(struct auth_xport_frame_hdr))
-#define XPORT_MIN_FRAME             XPORT_FRAME_HDR_BYTECNT
-
-#pragma pack(push, 1)
-
-struct auth_xport_frame_hdr {
-    /* bits 15-4  are for frame sync, bits 3-0 are flags */
-    uint16_t sync_flags;   /* bytes to insure we're at a frame */
-    uint16_t payload_len;   /* number of bytes in the payload, does not include the heaer. */
-};
-
-struct auth_xport_frame {
-    struct auth_xport_frame_hdr hdr;
-    uint8_t frame_payload[XPORT_FRAME_SIZE];
-};
-#pragma pack(pop)
 
 
 // ---------------- API ---------------------
@@ -85,12 +52,12 @@ struct auth_xport_instance
     /* If the lower transport has a send function */
     send_xport_t send_func;
 
-    /* vars used for re-assembling frames into a packet */
-    uint8_t rx_buf[600];  // TODO:  Make 600 this a CONFIG_ param
-    uint32_t rx_curr_offset;
-    bool rx_first_frame;
-    uint32_t payload_size;  // TODO, need to set/check how used.
+#ifdef CONFIG_AUTH_FRAGMENT
+    /* Struct for handling assembling message from multile fragments */
+    struct auth_message_recv recv_msg;
+#endif
 
+    uint32_t payload_size;  // TODO, need to set/check how used.
 };
 
 // allocate instances??
@@ -133,7 +100,7 @@ static int auth_xport_iobuffer_reset(struct auth_xport_io_buffer *iobuf)
 
 
 /**
- * @see auth_internal.h
+ *
  */
 static int auth_xport_buffer_put(struct auth_xport_io_buffer *iobuf, const uint8_t *in_buf, size_t num_bytes)
 {
@@ -146,7 +113,6 @@ static int auth_xport_buffer_put(struct auth_xport_io_buffer *iobuf, const uint8
     if(num_bytes <= 0) {
         return 0;
     }
-
 
     /* lock mutex */
     int err = k_mutex_lock(&iobuf->buf_mutex, K_FOREVER);
@@ -207,7 +173,6 @@ static int auth_xport_buffer_put(struct auth_xport_io_buffer *iobuf, const uint8
 
     return (int)total_copied;
 }
-
 
 
 static int auth_xport_buffer_get(struct auth_xport_io_buffer *iobuf, uint8_t *out_buf, size_t num_bytes)
@@ -367,8 +332,10 @@ int auth_xport_init(auth_xport_hdl_t *xporthdl, uint32_t flags, void* xport_para
     auth_xport_iobuffer_init(&xport_inst[0].send_buf);
     auth_xport_iobuffer_init(&xport_inst[0].recv_buf);
 
-    xport_inst[0].rx_first_frame = true;
-    xport_inst[0].rx_curr_offset = 0;
+#ifdef CONFIG_AUTH_FRAGMENT
+    auth_message_frag_init(&xport_inst[0].recv_msg);
+#endif
+
 
 #if CONFIG_BT_XPORT
     ret = auth_xp_bt_init(*xporthdl, 0, xport_params);
@@ -397,8 +364,6 @@ int auth_xport_deinit(const auth_xport_hdl_t xporthdl)
     auth_xport_iobuffer_reset(&xp_inst->send_buf);
     auth_xport_iobuffer_reset(&xp_inst->recv_buf);
 
-    xport_inst->rx_first_frame = true;
-    xport_inst->rx_curr_offset = 0;
 
 #if CONFIG_BT_XPORT
     ret = auth_xp_bt_deinit(xporthdl);
@@ -449,13 +414,13 @@ int auth_xport_get_max_payload(const auth_xport_hdl_t xporthdl)
 int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t len)
 {
     struct auth_xport_instance *xp_inst = (struct auth_xport_instance *)xporthdl;
-    bool do_framing = true;  /* always true for now */
-    int frame_bytes;
+    int fragment_bytes;
     int payload_bytes;
     int send_count = 0;
-    int num_frames = 0;
+    int num_fragments = 0;
     int send_ret = AUTH_SUCCESS;
-    struct auth_xport_frame frame;
+    struct auth_message_fragment msg_frag;
+
 
     /* If the lower transport MTU size isn't set, get it.  This can happen
      * when the the MTU is negotiated after the initial connection. */
@@ -463,21 +428,20 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
 	    xp_inst->payload_size = auth_xport_get_max_payload(xporthdl);
     }
 
-    const uint16_t max_frame = MIN(sizeof(frame), xp_inst->payload_size);
-    const uint16_t max_payload = max_frame - XPORT_FRAME_HDR_BYTECNT;
+    const uint16_t max_frame = MIN(sizeof(msg_frag), xp_inst->payload_size);
+    const uint16_t max_payload = max_frame - XPORT_FRAG_HDR_BYTECNT;
 
     /* sanity check */
     if(xp_inst == NULL) {
         return AUTH_ERROR_INVALID_PARAM;
     }
 
-    /* if we're not framing */
-    if(!do_framing) {
-        return auth_xport_internal_send(xporthdl, data, len);
-    }
-
+    /* if we're not message fragmentation */
+#ifndef CONFIG_AUTH_FRAGMENT
+    return auth_xport_internal_send(xporthdl, data, len);
+#else
     /* set frame header */
-    frame.hdr.sync_flags = XPORT_FRAME_SYNC_BITS|XPORT_FRAME_BEGIN;
+    msg_frag.hdr.sync_flags = XPORT_FRAG_SYNC_BITS|XPORT_FRAG_BEGIN;
 
     /* Break up data to fit into lower transport MTU */
     while (len > 0) {
@@ -485,30 +449,30 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
         /* get payload bytes */
         payload_bytes = MIN(max_payload, len);
 
-        frame_bytes = payload_bytes + XPORT_FRAME_HDR_BYTECNT;
+        fragment_bytes = payload_bytes + XPORT_FRAG_HDR_BYTECNT;
 
         /* is this the last frame? */
         if((len - payload_bytes) == 0) {
 
-            frame.hdr.sync_flags = XPORT_FRAME_SYNC_BITS|XPORT_FRAME_END;
+            msg_frag.hdr.sync_flags = XPORT_FRAG_SYNC_BITS|XPORT_FRAG_END;
 
             /* now check if we're only sending one frame, then set
              * the frame begin flag */
-            if(num_frames == 0) {
-                frame.hdr.sync_flags |= XPORT_FRAME_BEGIN;
+            if(num_fragments == 0) {
+                msg_frag.hdr.sync_flags |= XPORT_FRAG_BEGIN;
             }
         }
 
         /* copy body */
-        memcpy(frame.frame_payload, data, payload_bytes);
-        frame.hdr.payload_len = payload_bytes;
+        memcpy(msg_frag.frag_payload, data, payload_bytes);
+        msg_frag.hdr.payload_len = payload_bytes;
 
         /* convert header to Big Endian, network byte order */
-        frame.hdr.sync_flags = sys_cpu_to_be16(frame.hdr.sync_flags);
-        frame.hdr.payload_len = sys_cpu_to_be16(frame.hdr.payload_len);
+        msg_frag.hdr.sync_flags = sys_cpu_to_be16(msg_frag.hdr.sync_flags);
+        msg_frag.hdr.payload_len = sys_cpu_to_be16(msg_frag.hdr.payload_len);
 
         /* send frame */
-        send_ret = auth_xport_internal_send(xporthdl, (const uint8_t*)&frame, frame_bytes);
+        send_ret = auth_xport_internal_send(xporthdl, (const uint8_t*)&msg_frag, fragment_bytes);
 
         if(send_ret < 0) {
             LOG_ERR("Failed to send xport frame, error: %d", send_ret);
@@ -516,22 +480,44 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
         }
 
         /* verify all bytes were sent */
-        if(send_ret != frame_bytes) {
-            LOG_ERR("Failed to to send all bytes, send: %d, requested: %d", send_ret, frame_bytes);
+        if(send_ret != fragment_bytes) {
+            LOG_ERR("Failed to to send all bytes, send: %d, requested: %d", send_ret, fragment_bytes);
             return AUTH_ERROR_XPORT_SEND;
         }
 
         /* set next flags */
-        frame.hdr.sync_flags = XPORT_FRAME_SYNC_BITS|XPORT_FRAME_NEXT;
+        msg_frag.hdr.sync_flags = XPORT_FRAG_SYNC_BITS|XPORT_FRAG_NEXT;
 
         len -= payload_bytes;
         data += payload_bytes;
         send_count += payload_bytes;
-        num_frames++;
-   }
+        num_fragments++;
+    }
 
     return send_count;
+
+#endif
 }
+
+
+/**
+ * @see auth_xport.h
+ *
+ * Put bytes received from lower transport into receive queue
+ */
+int auth_xport_put_recv(const auth_xport_hdl_t xporthdl, const uint8_t *buf, size_t buflen)
+{
+    struct auth_xport_instance *xp_inst = (struct auth_xport_instance *)xporthdl;
+
+    if(xp_inst == NULL) {
+        return AUTH_ERROR_INVALID_PARAM;
+    }
+
+    int ret = auth_xport_buffer_put(&xp_inst->recv_buf, buf, buflen);
+
+    return ret;
+}
+
 
 /**
  * @see auth_xport.h
@@ -564,17 +550,23 @@ int auth_xport_getnum_send_queued_bytes(const auth_xport_hdl_t xporthdl)
 
     return numbytes;
 }
+
+
+
+
+#ifdef CONFIG_AUTH_FRAGMENT
+
 /**
- * @see auth_xport.h
+ * @see auth_internal.h
  */
-bool auth_xport_fullframe(const uint8_t *buffer, uint16_t buflen, uint16_t *frame_beg_offset, uint16_t *frame_byte_cnt)
+bool auth_message_get_fragment(const uint8_t *buffer, uint16_t buflen, uint16_t *frag_beg_offset, uint16_t *frag_byte_cnt)
 {
     uint16_t cur_offset;
     uint16_t temp_payload_len;
-    struct auth_xport_frame_hdr *frm_hdr;
+    struct auth_message_frag_hdr *frm_hdr;
 
     /* quick check */
-    if(buflen < XPORT_MIN_FRAME)
+    if(buflen < XPORT_MIN_FRAGMENT)
     {
         return false;
     }
@@ -582,9 +574,9 @@ bool auth_xport_fullframe(const uint8_t *buffer, uint16_t buflen, uint16_t *fram
     /* look for sync bytes  */
     for(cur_offset = 0; cur_offset < buflen; cur_offset++, buffer++) {
         /* look for the first sync byte */
-        if(*buffer == XPORT_FRAME_SYNC_BYTE_HIGH) {
+        if(*buffer == XPORT_FRAG_SYNC_BYTE_HIGH) {
             if (cur_offset + 1 < buflen) {
-                if((*(buffer + 1) & XPORT_FRAME_LOWBYTE_MASK) == XPORT_FRAME_SYNC_BYTE_LOW) {
+                if((*(buffer + 1) & XPORT_FRAG_LOWBYTE_MASK) == XPORT_FRAG_SYNC_BYTE_LOW) {
                     /* found sync bytes */
                     break;
                 }
@@ -592,12 +584,13 @@ bool auth_xport_fullframe(const uint8_t *buffer, uint16_t buflen, uint16_t *fram
         }
     }
 
+    /* Didn't find Fragment sync bytes */
     if(cur_offset == buflen) {
         return false;
     }
 
     /* should have a full header, check frame len */
-    frm_hdr = (struct auth_xport_frame_hdr *)buffer;
+    frm_hdr = (struct auth_message_frag_hdr *)buffer;
 
     /* convert from be to cpu */
     temp_payload_len = sys_be16_to_cpu(frm_hdr->payload_len);
@@ -612,26 +605,38 @@ bool auth_xport_fullframe(const uint8_t *buffer, uint16_t buflen, uint16_t *fram
     frm_hdr->payload_len = sys_be16_to_cpu(frm_hdr->payload_len);
 
     /* Have a full frame*/
-    *frame_beg_offset = cur_offset;
-    *frame_byte_cnt = frm_hdr->payload_len;
+    *frag_beg_offset = cur_offset;
+    *frag_byte_cnt = frm_hdr->payload_len;
 
     return true;
 }
 
+
+
+/* funcs to handle message fragmentation */
+void auth_message_frag_init(struct auth_message_recv *recv_msg)
+{
+    recv_msg->rx_curr_offset = 0;
+    recv_msg->rx_first_frag = false;
+}
+
 /**
- * @see auth_xport.h
+ * @see auth_internal.h
  */
-int auth_xport_put_recv_bytes(const auth_xport_hdl_t xporthdl, const uint8_t *buf, size_t buflen)
+int auth_message_assemble(const auth_xport_hdl_t xporthdl, const uint8_t *buf, size_t buflen)
 {
     struct auth_xport_instance *xp_inst = (struct auth_xport_instance *)xporthdl;
-    struct auth_xport_frame *rx_frame;
+    struct auth_message_recv *msg_recv;
+    struct auth_message_fragment *rx_frag;
     int free_buf_space;
     int recv_ret = 0;
-    bool do_framing = true;
+
 
     if(xp_inst == NULL) {
         return AUTH_ERROR_INVALID_PARAM;
     }
+
+    msg_recv = (struct auth_message_recv *)&xp_inst->recv_msg;
 
     /* If max payload size isn't set, get it from the lower transport.
      * This can happen if the lower transports frame/MTU size is set
@@ -640,104 +645,100 @@ int auth_xport_put_recv_bytes(const auth_xport_hdl_t xporthdl, const uint8_t *bu
 	     xp_inst->payload_size = auth_xport_get_max_payload(xporthdl);
     }
 
-    /* If not framing, then just put the data into the receive buffer */
-    if(!do_framing) {
-        return auth_xport_buffer_put(&xp_inst->recv_buf, buf, buflen);
-     }
 
-
-    /* Reassemble packet from frames */
-    /* read a frame from the peer */
-    rx_frame = (struct auth_xport_frame *)buf;
+    /* Reassemble a message from one for more fragments. */
+    rx_frag = (struct auth_message_fragment *)buf;
 
     /* check for start flag */
-    if(xp_inst->rx_first_frame) {
+    if(msg_recv->rx_first_frag) {
 
-        xp_inst->rx_first_frame = false;
+        msg_recv->rx_first_frag = false;
 
-        if(!(rx_frame->hdr.sync_flags & XPORT_FRAME_BEGIN)) {
+        if(!(rx_frag->hdr.sync_flags & XPORT_FRAG_BEGIN)) {
             /* reset vars */
-            xp_inst->rx_curr_offset = 0;
-            xp_inst->rx_first_frame = true;
+            msg_recv->rx_curr_offset = 0;
+            msg_recv->rx_first_frag = true;
 
-            LOG_ERR("RX-Missing beginning frame");
+            LOG_ERR("RX-Missing beginning fragment");
             return AUTH_ERROR_XPORT_FRAME;
         }
 
-        LOG_DBG("RX-Got BEGIN frame.");
+        LOG_DBG("RX-Got BEGIN fragment.");
     }
 
-    /* check frame sync bytes */
-    if((rx_frame->hdr.sync_flags & XPORT_FRAME_SYNC_MASK) != XPORT_FRAME_SYNC_BITS) {
+    /* check fragment sync bytes */
+    if((rx_frag->hdr.sync_flags & XPORT_FRAG_SYNC_MASK) != XPORT_FRAG_SYNC_BITS) {
         /* reset vars */
-        xp_inst->rx_curr_offset = 0;
-        xp_inst->rx_first_frame = true;
+        msg_recv->rx_curr_offset = 0;
+        msg_recv->rx_first_frag = true;
 
-        LOG_ERR("RX-Invalid frame.");
+        LOG_ERR("RX-Invalid fragment.");
         return AUTH_ERROR_XPORT_FRAME;
     }
 
-    /* Subtract out frame header */
-    buflen -= sizeof(rx_frame->hdr);
+    /* Subtract out fragment header */
+    buflen -= XPORT_FRAG_HDR_BYTECNT;
 
-    /* move beyond frame header */
-    buf += sizeof(rx_frame->hdr);
+    /* move beyond fragment header */
+    buf += XPORT_FRAG_HDR_BYTECNT;
 
     /* sanity check, if zero or negative */
     if(buflen <= 0) {
         /* reset vars */
-        xp_inst->rx_curr_offset = 0;
-        xp_inst->rx_first_frame = true;
-        LOG_ERR("RX-Empty frame!!");
+        msg_recv->rx_curr_offset = 0;
+        msg_recv->rx_first_frag = true;
+        LOG_ERR("RX-Empty fragmente!!");
         return AUTH_ERROR_XPORT_FRAME;
     }
 
     /* ensure there's enough free space in our temp buffer */
-    free_buf_space = sizeof(xp_inst->rx_buf) - xp_inst->rx_curr_offset;
+    free_buf_space = sizeof(msg_recv->rx_buffer) - msg_recv->rx_curr_offset;
 
     if(free_buf_space < buflen) {
         /* reset vars */
-        xp_inst->rx_curr_offset = 0;
-        xp_inst->rx_first_frame = true;
+        msg_recv->rx_curr_offset = 0;
+        msg_recv->rx_first_frag = true;
         LOG_ERR("RX-not enough free space");
         return AUTH_ERROR_XPORT_FRAME;
     }
 
     /* copy payload bytes */
-    memcpy(xp_inst->rx_buf + xp_inst->rx_curr_offset, buf, buflen);
+    memcpy(msg_recv->rx_buffer + msg_recv->rx_curr_offset, buf, buflen);
 
-    xp_inst->rx_curr_offset += buflen;
+    msg_recv->rx_curr_offset += buflen;
 
     /* returned the number of bytes queued */
     recv_ret = buflen;
 
-    /* Is this the last frame? */
-    if(rx_frame->hdr.sync_flags & XPORT_FRAME_END) {
+    /* Is this the last fragment of the message? */
+    if(rx_frag->hdr.sync_flags & XPORT_FRAG_END) {
 
-        /* log number payload bytes received, don't include dtls header */
-        LOG_DBG("RX-Got LAST frame, total bytes: %d", xp_inst->rx_curr_offset);
+        /* log number payload bytes received. */
+        LOG_DBG("RX-Got LAST fragment, total bytes: %d", msg_recv->rx_curr_offset);
 
         int free_bytes = auth_xport_buffer_avail_bytes(&xp_inst->recv_buf);
 
-        /* Is there enough free space to write record? */
-        if(free_bytes >= xp_inst->rx_curr_offset) {
+        /* Is there enough free space to write entire message? */
+        if(free_bytes >= msg_recv->rx_curr_offset) {
 
-            /* copy into receive buffer */
-            recv_ret = auth_xport_buffer_put(&xp_inst->recv_buf, xp_inst->rx_buf,
-                                             xp_inst->rx_curr_offset);
+            /* copy message into receive buffer */
+            recv_ret = auth_xport_buffer_put(&xp_inst->recv_buf, msg_recv->rx_buffer,
+                                             msg_recv->rx_curr_offset);
 
         } else {
-            int need = xp_inst->rx_curr_offset - free_bytes;
+            int need = msg_recv->rx_curr_offset - free_bytes;
             LOG_ERR("Not enough room in RX buffer, free: %d, need %d bytes.", free_bytes, need);
         }
 
         /* reset vars */
-        xp_inst->rx_curr_offset = 0;
-        xp_inst->rx_first_frame = true;
+        msg_recv->rx_curr_offset = 0;
+        msg_recv->rx_first_frag = true;
     }
 
     return recv_ret;
 }
+
+#endif
 
 /**
  * @see auth_xport.h
