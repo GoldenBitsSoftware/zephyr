@@ -146,8 +146,8 @@ struct authenticate_conn
      * status changes/fails in an ISR context */
     struct k_work auth_status_work;
 
-    // thread stuff
-    k_tid_t auth_tid;  // handshake thread id
+    /* thread vars */
+    k_tid_t auth_tid;
     struct k_thread auth_thrd_data;
 
     /* authentication thread for this connection */
@@ -155,6 +155,7 @@ struct authenticate_conn
 
 
     /* Pointer to internal details, do not touch!!! */
+    // Is this used???
     //void *internal_obj;
 
 #if defined(CONFIG_AUTH_DTLS)
@@ -245,7 +246,6 @@ void auth_svc_lib_status(struct authenticate_conn *auth_conn, enum auth_status s
  * @return One of AUTH_STATUS_*
  */
 int auth_lib_cancel(struct authenticate_conn *auth_conn);
-
 
 
 

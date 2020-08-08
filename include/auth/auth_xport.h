@@ -135,6 +135,17 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
  */
 int auth_xport_recv(const auth_xport_hdl_t xporthdl, uint8_t *buff, uint32_t buf_len, uint32_t timeoutMsec);
 
+/**
+ * Used by lower transport to put bytes reveived into rx queue.
+ *
+ * @param xporthdl   Transport handle.
+ * @param buf        Pointer to bytes to put.
+ * @param buflen     Byte len of buffer.
+ *
+ * @return           Number of bytes added to receive queue.
+ */
+int auth_xport_put_recv(const auth_xport_hdl_t xporthdl, const uint8_t *buf, size_t buflen);
+
 
 /**
  * Get the number of bytes queued for sending.
@@ -145,32 +156,6 @@ int auth_xport_recv(const auth_xport_hdl_t xporthdl, uint8_t *buff, uint32_t buf
  */
 int auth_xport_getnum_send_queued_bytes(const auth_xport_hdl_t xporthdl);
 
-/**
- * Used by lower transport to put received bytes into recv queue. Handle framing and
- * puts full message into receive queue. Handle reassembly of message fragments.
- *
- * @param xporthdl  Transport handle.
- * @param buff      Pointer to one frame.
- * @param buflen    Number of bytes in frame
- *
- * @return The number of bytes queued, can be less than requested.
- *         On error, negative value is returned.
- */
-int auth_xport_put_recv_bytes(const auth_xport_hdl_t xporthdl, const uint8_t *buff, size_t buflen);
-
-
-/**
- * Scans buffer to determine if frame is present.
- *
- * @param buffer            Buffer to scan.
- * @param buflen            Buffer length.
- * @param frame_beg_offset  Offset from buffer begin where frame starts.
- * @param frame_byte_cnt    Number of bytes in this frame.
- *
- * @return  true if full frame found, else false.
- */
-bool auth_xport_fullframe(const uint8_t *buffer, uint16_t buflen, uint16_t *frame_beg_offset,
-                          uint16_t *frame_byte_cnt);
 
 
 /**

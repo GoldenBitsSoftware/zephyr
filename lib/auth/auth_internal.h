@@ -35,6 +35,70 @@ struct auth_ringbuf {
 };
 
 
+#ifdef CONFIG_AUTH_FRAGMENT
+
+/**
+ * Defines to handle message fragmentation over the different transports.
+ */
+#define XPORT_MAX_MESSAGE_SIZE          256u  /* should be at least as large as the MTU */
+                                              // TODO:  Make this a CONFIG_ param
+/**
+ * A message is broken up into multiple fragments.  Each fragement has
+ * sync bytes, flags, and fragment length.
+ */
+#define XPORT_FRAG_SYNC_BYTE_HIGH       (0xA5)
+#define XPORT_FRAG_SYNC_BYTE_LOW        (0x90)
+#define XPORT_FRAG_LOWBYTE_MASK         (0xF0)  /* bits 3-0 for flags */
+
+#define XPORT_FRAG_SYNC_BITS            ((XPORT_FRAG_SYNC_BYTE_HIGH << 8u) | XPORT_FRAG_SYNC_BYTE_LOW)
+#define XPORT_FRAG_SYNC_MASK            (0xFFF0)
+
+/**
+ * Bitlfags used to indicate fragment order
+ */
+#define XPORT_FRAG_BEGIN                (0x1)
+#define XPORT_FRAG_NEXT                 (0x2)
+#define XPORT_FRAG_END                  (0x4)
+#define XPORT_FRAG_UNUSED               (0x8)
+
+#define XPORT_FRAG_HDR_BYTECNT          (sizeof(struct auth_message_frag_hdr))
+#define XPORT_MIN_FRAGMENT              XPORT_FRAG_HDR_BYTECNT
+
+
+#pragma pack(push, 1)
+/**
+ * Fragment header
+ */
+struct auth_message_frag_hdr {
+    /* bits 15-4  are for fragment sync, bits 3-0 are flags */
+    uint16_t sync_flags;    /* bytes to insure we're at a fragment */
+    uint16_t payload_len;   /* number of bytes in the payload, does not include the header. */
+};
+
+/**
+ * One fragment, one or more fragments make up a message.
+ */
+struct auth_message_fragment {
+    struct auth_message_frag_hdr hdr;
+    uint8_t frag_payload[XPORT_MAX_MESSAGE_SIZE];
+};
+#pragma pack(pop)
+
+
+/**
+ * Contains buffer used to assemble a message from multiple fragments.
+ */
+struct auth_message_recv
+{
+    /* pointer to buffer where message is assembled */
+    uint8_t rx_buffer[XPORT_MAX_MESSAGE_SIZE];
+
+    /* vars used for re-assembling frames into a message */
+    uint32_t rx_curr_offset;
+    bool rx_first_frag;
+};
+#endif
+
 
 /**
  * Starts the authentication thread.
@@ -182,9 +246,39 @@ int auth_server_tx(struct authenticate_conn *conn, const unsigned char *data, si
  */
 int auth_sever_rx(struct authenticate_conn *conn, uint8_t *buf, size_t len);
 
+#ifdef CONFIG_AUTH_FRAGMENT
+
+/* funcs to handle message fragmentation */
+void auth_message_frag_init(struct auth_message_recv *recv_msg);
+
+/**
+ * Scans buffer to determine if a fragment is present.
+ *
+ * @param buffer            Buffer to scan.
+ * @param buflen            Buffer length.
+ * @param frag_beg_offset   Offset from buffer begin where fragment starts.
+ * @param frag_byte_cnt     Number of bytes in this fragment.
+ *
+ * @return  true if full frame found, else false.
+ */
+bool auth_message_get_fragment(const uint8_t *buffer, uint16_t buflen, uint16_t *frag_beg_offset, uint16_t *frag_byte_cnt);
+
+/**
+ * Used by lower transport to put received bytes into recv queue. Handle framing and
+ * puts full message into receive queue. Handles reassembly of message fragments.
+ *
+ * @param xporthdl  Transport handle.
+ * @param buff      Pointer to one frame.
+ * @param buflen    Number of bytes in frame
+ *
+ * @return The number of bytes queued, can be less than requested.
+ *         On error, negative value is returned.
+ */
+int auth_message_assemble(const auth_xport_hdl_t xporthdl, const uint8_t *buf, size_t buflen);
+#endif
+
 
 void auth_ringbuf_init(struct auth_ringbuf *ringbuf);
-
 
 void auth_ringbuf_put_byte(struct auth_ringbuf *ringbuf, uint8_t one_byte);
 

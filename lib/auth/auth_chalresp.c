@@ -248,7 +248,8 @@ static bool auth_server_recv_msg(struct authenticate_conn *auth_conn, uint8_t *m
     while((int)msglen > 0) {
 
         // TODO: Add receive timeout function
-       numbytes = auth_xport_recv(auth_conn->xport_hdl, msgbuf, msglen, 3000);
+        // TODO:  Add retry? Add ability to cancel when waiting for data
+       numbytes = auth_xport_recv(auth_conn->xport_hdl, msgbuf, msglen, 30000);
 
         if(numbytes <= 0) {
             return false;
