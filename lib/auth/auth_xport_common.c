@@ -564,6 +564,7 @@ bool auth_message_get_fragment(const uint8_t *buffer, uint16_t buflen, uint16_t 
     uint16_t cur_offset;
     uint16_t temp_payload_len;
     struct auth_message_frag_hdr *frm_hdr;
+    bool found_sync_bytes = false;
 
     /* quick check */
     if(buflen < XPORT_MIN_FRAGMENT)
@@ -578,6 +579,7 @@ bool auth_message_get_fragment(const uint8_t *buffer, uint16_t buflen, uint16_t 
             if (cur_offset + 1 < buflen) {
                 if((*(buffer + 1) & XPORT_FRAG_LOWBYTE_MASK) == XPORT_FRAG_SYNC_BYTE_LOW) {
                     /* found sync bytes */
+                    found_sync_bytes = true;
                     break;
                 }
             }
@@ -585,7 +587,7 @@ bool auth_message_get_fragment(const uint8_t *buffer, uint16_t buflen, uint16_t 
     }
 
     /* Didn't find Fragment sync bytes */
-    if(cur_offset == buflen) {
+    if(!found_sync_bytes) {
         return false;
     }
 
@@ -593,8 +595,10 @@ bool auth_message_get_fragment(const uint8_t *buffer, uint16_t buflen, uint16_t 
     frm_hdr = (struct auth_message_frag_hdr *)buffer;
 
     /* convert from be to cpu */
-    temp_payload_len = sys_be16_to_cpu(frm_hdr->payload_len);
+    temp_payload_len = sys_be16_to_cpu(frm_hdr->payload_len) + XPORT_FRAG_HDR_BYTECNT;
 
+    /* does the buffer contian all of the fragment bytes?
+     * Including the header. */
     if(temp_payload_len > (buflen - cur_offset)) {
         /* not enough bytes for a full frame */
         return false;
@@ -604,9 +608,11 @@ bool auth_message_get_fragment(const uint8_t *buffer, uint16_t buflen, uint16_t 
     frm_hdr->sync_flags = sys_be16_to_cpu(frm_hdr->sync_flags);
     frm_hdr->payload_len = sys_be16_to_cpu(frm_hdr->payload_len);
 
-    /* Have a full frame*/
+    /* Have a full fragment */
     *frag_beg_offset = cur_offset;
-    *frag_byte_cnt = frm_hdr->payload_len;
+
+    /* Return fragment byte count, including the header */
+    *frag_byte_cnt = frm_hdr->payload_len + XPORT_FRAG_HDR_BYTECNT;
 
     return true;
 }
@@ -617,7 +623,7 @@ bool auth_message_get_fragment(const uint8_t *buffer, uint16_t buflen, uint16_t 
 void auth_message_frag_init(struct auth_message_recv *recv_msg)
 {
     recv_msg->rx_curr_offset = 0;
-    recv_msg->rx_first_frag = false;
+    recv_msg->rx_first_frag = true;
 }
 
 /**

@@ -265,21 +265,21 @@ static void auth_xp_serial_irq_recv_fragment(struct serial_xp_instance *xp_inst)
     if(auth_message_get_fragment(xp_inst->rx_buf, xp_inst->curr_rx_cnt,
                                 &frag_beg_offset, &frag_bytes)) {
 
-        /* A full frame is present in the input buffer starting
-         * at frame_beg_offset and frame_bytes.  It's possible to
-         * have the beginning of a second frame following the first frame. */
+        /* A full message fragment is present in the input buffer starting
+         * at frag_beg_offset and frag_bytes in length.  It's possible to
+         * have the beginning of a second fragment following this first fragment. */
 
         /* get new rx buffer */
         new_rxbuf = serial_xp_get_buffer(SERIAL_XP_BUFFER_LEN);
 
-        /* if there's garbage before the frame start,then skip.  If there
-         * is another frame or partial frame following then copy to new buffer.
+        /* If there's garbage before the frame start,then skip.  If there
+         * is another fragment or partial fragment following then copy to new buffer.
          * 'remaining_buffer_bytes' is the number of valid bytes after the current
-         * frame. */
+         * fragment. */
         remaining_buffer_bytes = xp_inst->curr_rx_cnt - frag_beg_offset - frag_bytes;
 
-        /* If frame bytes are less than the current, then the buffer contains bytes
-         * for the next fame */
+        /* If fragment bytes are less than the current, then the buffer contains bytes
+         * for the next fragment. */
         if((remaining_buffer_bytes != 0) && (new_rxbuf != NULL)) {
             /* copy extra bytes to new buffer */
             memcpy(new_rxbuf, xp_inst->rx_buf + frag_beg_offset + frag_bytes,
