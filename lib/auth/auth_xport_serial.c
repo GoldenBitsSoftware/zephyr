@@ -141,12 +141,13 @@ static uint8_t *serial_xp_get_buffer(uint32_t buflen)
 
 static void serial_xp_free_buffer(const uint8_t *buffer)
 {
+    if(buffer == NULL ) {
+        return;
+    }
     struct serial_xp_buffer *xp_buffer = serial_xp_buffer_info(buffer);
 
-    if(xp_buffer != NULL) {
-        xp_buffer->in_use = false;
-        atomic_clear_bit(buffer_in_use, xp_buffer->bufidx);
-    }
+    xp_buffer->in_use = false;
+    atomic_clear_bit(buffer_in_use, xp_buffer->bufidx);
 }
 
 
@@ -193,10 +194,6 @@ static void auth_xp_serial_free_instance(struct serial_xp_instance *serial_inst)
         serial_inst->curr_rx_cnt = 0;
     }
 }
-
-
-
-
 
 static void auth_xp_serial_recv_thrd(void *arg1, void *arg2, void *arg3)
 {
@@ -372,6 +369,11 @@ static void auth_xp_serial_irq_cb(void *user_data)
 
     /* Any data ready to send? */
     if(xp_inst->tx_bytes == 0) {
+        /* check if we can disable TX */
+        if(uart_irq_tx_complete(uart_dev)) {
+            uart_irq_tx_disable(uart_dev);
+        }
+
         return;
     }
 
@@ -388,16 +390,16 @@ static void auth_xp_serial_irq_cb(void *user_data)
 
         /* if not more data to send, then break */
         if(xp_inst->tx_bytes == 0) {
+            LOG_INF("Sent tx buffer, bytes: %d.", xp_inst->curr_tx_cnt);
             break;
         }
     }
 
     /* we're done sending */
-    if(xp_inst->tx_bytes == 0) {
+    if((xp_inst->tx_bytes == 0) && (xp_inst->tx_buf != NULL)) {
         serial_xp_free_buffer(xp_inst->tx_buf);
         xp_inst->tx_buf = NULL;
         xp_inst->curr_tx_cnt = 0;
-        LOG_ERR("Send tx buffer.");
     }
 
     //LOG_ERR("Send %d bytes", total_cnt);
