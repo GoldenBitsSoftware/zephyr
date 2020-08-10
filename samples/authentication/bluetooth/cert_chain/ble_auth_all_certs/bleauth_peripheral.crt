@@ -1,0 +1,50 @@
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number: 12290 (0x3002)
+    Signature Algorithm: ecdsa-with-SHA256
+        Issuer: C=US, ST=California, O=Zephyr BLE Auth Test, OU=BLE Auth Test, CN=Zephyr BLE Auth Intermediate/emailAddress=dummy@dummy.com
+        Validity
+            Not Before: Jan 18 22:29:36 2020 GMT
+            Not After : Jan 27 22:29:36 2021 GMT
+        Subject: C=US, ST=California, L=San Diego, O=Zephyr BLE Authentication Test, OU=Zephyr BLE Auth, CN=BLE Auth Device 1 Test/emailAddress=dummy@dummy.com
+        Subject Public Key Info:
+            Public Key Algorithm: id-ecPublicKey
+                Public-Key: (256 bit)
+                pub: 
+                    04:d5:1a:9d:f2:54:59:74:dc:f1:04:26:12:6d:28:
+                    6c:83:38:72:87:a3:d1:7f:da:5f:7d:c7:89:7b:3d:
+                    01:ae:f9:9a:9b:6b:e8:37:a5:82:2d:a0:0c:14:a6:
+                    92:d5:89:1f:54:44:e7:67:58:e6:b0:96:87:25:b6:
+                    c4:24:e0:59:1a
+                ASN1 OID: prime256v1
+                NIST CURVE: P-256
+        X509v3 extensions:
+            X509v3 Basic Constraints: 
+                CA:FALSE
+            X509v3 Authority Key Identifier: 
+                keyid:36:1F:70:3A:68:8A:0D:81:79:00:21:5C:DA:CF:ED:7D:F4:96:85:2A
+
+            X509v3 Key Usage: critical
+                Digital Signature
+    Signature Algorithm: ecdsa-with-SHA256
+         30:45:02:20:03:c6:e4:6e:1d:29:95:26:5e:83:f5:b1:da:99:
+         c2:f7:ad:d4:bf:b9:9e:65:69:a9:cb:35:ac:48:71:82:c7:96:
+         02:21:00:e6:82:07:76:69:0d:09:5d:c2:ce:7e:63:68:12:da:
+         b0:0d:44:e6:4a:41:39:1f:f0:4f:a3:9b:b5:78:7c:a2:3c
+-----BEGIN CERTIFICATE-----
+MIICijCCAjCgAwIBAgICMAIwCgYIKoZIzj0EAwIwgaAxCzAJBgNVBAYTAlVTMRMw
+EQYDVQQIDApDYWxpZm9ybmlhMR0wGwYDVQQKDBRaZXBoeXIgQkxFIEF1dGggVGVz
+dDEWMBQGA1UECwwNQkxFIEF1dGggVGVzdDElMCMGA1UEAwwcWmVwaHlyIEJMRSBB
+dXRoIEludGVybWVkaWF0ZTEeMBwGCSqGSIb3DQEJARYPZHVtbXlAZHVtbXkuY29t
+MB4XDTIwMDExODIyMjkzNloXDTIxMDEyNzIyMjkzNlowgboxCzAJBgNVBAYTAlVT
+MRMwEQYDVQQIDApDYWxpZm9ybmlhMRIwEAYDVQQHDAlTYW4gRGllZ28xJzAlBgNV
+BAoMHlplcGh5ciBCTEUgQXV0aGVudGljYXRpb24gVGVzdDEYMBYGA1UECwwPWmVw
+aHlyIEJMRSBBdXRoMR8wHQYDVQQDDBZCTEUgQXV0aCBEZXZpY2UgMSBUZXN0MR4w
+HAYJKoZIhvcNAQkBFg9kdW1teUBkdW1teS5jb20wWTATBgcqhkjOPQIBBggqhkjO
+PQMBBwNCAATVGp3yVFl03PEEJhJtKGyDOHKHo9F/2l99x4l7PQGu+Zqba+g3pYIt
+oAwUppLViR9UROdnWOawlocltsQk4Fkaoz4wPDAJBgNVHRMEAjAAMB8GA1UdIwQY
+MBaAFDYfcDpoig2BeQAhXNrP7X30loUqMA4GA1UdDwEB/wQEAwIHgDAKBggqhkjO
+PQQDAgNIADBFAiADxuRuHSmVJl6D9bHamcL3rdS/uZ5laanLNaxIcYLHlgIhAOaC
+B3ZpDQldws5+Y2gS2rANROZKQTkf8E+jm7V4fKI8
+-----END CERTIFICATE-----
