@@ -27,7 +27,7 @@
 
 #include <auth/auth_lib.h>
 
-LOG_MODULE_REGISTER(periph_auth, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
+LOG_MODULE_REGISTER(periph_auth, CONFIG_AUTH_LOG_LEVEL);
 
 #if defined(CONFIG_AUTH_DTLS)
 #include "../cert_chain/ble_auth_all_certs/bleauth_ca_chain.h"
