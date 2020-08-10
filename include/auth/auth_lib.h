@@ -36,7 +36,7 @@ extern "C" {
 #define AUTH_ERROR_INTERNAL                 (AUTH_ERROR_BASE - 7)
 #define AUTH_ERROR_XPORT_SEND               (AUTH_ERROR_BASE - 8)
 #define AUTH_ERROR_XPORT_FRAME              (AUTH_ERROR_BASE - 9)
-#define AUTH_CRYPTO_ERROR		    (AUTH_ERROR_BASE - 10)
+#define AUTH_CRYPTO_ERROR                   (AUTH_ERROR_BASE - 10)
 
 
 /**
