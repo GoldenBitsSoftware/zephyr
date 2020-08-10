@@ -106,7 +106,8 @@ static int auth_chalresp_hash(const uint8_t *random_chal, uint8_t *hash)
     }
 
     /* calc the final hash */
-    err = tc_sha256_final(hash, &hash_state);
+    err = tc_sha256_final(hash, &hash_state) == TC_CRYPTO_SUCCESS ?
+                      AUTH_SUCCESS : AUTH_CRYPTO_ERROR;
 
     return err;
 }
