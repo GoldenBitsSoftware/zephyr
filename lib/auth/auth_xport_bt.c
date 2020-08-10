@@ -14,10 +14,12 @@
 #include <auth/auth_lib.h>
 #include <auth/auth_xport.h>
 
+#include "auth_internal.h"
+
 
 #define LOG_LEVEL CONFIG_AUTH_LOGLEVEL
 #include <logging/log.h>
-LOG_MODULE_REGISTER(auth_bt_xport, CONFIG_AUTH_LOGLEVEL);
+LOG_MODULE_REGISTER(auth_bt_xport, CONFIG_AUTH_LOG_LEVEL);
 
 
 #define BLE_LINK_HEADER_BYTES               (2u + 1u)  /**< two bytes for header, not sure about extra byte */
@@ -268,7 +270,7 @@ int auth_xp_bt_get_max_payload(const auth_xport_hdl_t xporthdl)
 #if defined(CONFIG_BT_GATT_CLIENT)
 
 /**
- * @see auth_internal.h
+ * @see auth_xport.h
  */
 u8_t auth_xp_bt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
                                    const void *data, u16_t length)
@@ -288,8 +290,14 @@ u8_t auth_xp_bt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_pa
         return BT_GATT_ITER_CONTINUE;
     }
 
+
     // put the received bytes into the receive queue
-    int err = auth_xport_put_recv_bytes(bt_xp_conn->xporthdl, data, length);
+#ifdef CONFIG_AUTH_FRAGMENT
+    int err = auth_message_assemble(bt_xp_conn->xporthdl, buf, len);
+#else
+    int err = auth_xport_buffer_put(bt_xp_conn->xporthdl, uf, len);
+#endif
+
 
     /* if no error, need to return num of bytes handled. */
     /* Ques: What if only able to put partial bytes b/c recv queue is full? */
@@ -517,7 +525,11 @@ ssize_t auth_xp_bt_central_write(struct bt_conn *conn, const struct bt_gatt_attr
     LOG_DBG("client write called, len: %d", len);
 
     // put the received bytes into the receive queue
-    int err = auth_xport_put_recv_bytes(bt_xp_conn->xporthdl, buf, len);
+#ifdef CONFIG_AUTH_FRAGMENT
+    int err = auth_message_assemble(bt_xp_conn->xporthdl, buf, len);
+#else
+    int err = auth_xport_buffer_put(bt_xp_conn->xporthdl, uf, len);
+#endif
 
     /* if no error, need to return num of bytes handled. */
     if(err >= 0) {
