@@ -293,7 +293,6 @@ void auth_message_hdr_to_cpu(struct auth_message_frag_hdr *frag_hdr);
  */
 void auth_message_hdr_to_be16(struct auth_message_frag_hdr *frag_hdr);
 
-
 #endif
 
 
