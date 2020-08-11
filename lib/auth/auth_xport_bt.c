@@ -293,9 +293,9 @@ u8_t auth_xp_bt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_pa
 
     // put the received bytes into the receive queue
 #ifdef CONFIG_AUTH_FRAGMENT
-    int err = auth_message_assemble(bt_xp_conn->xporthdl, buf, len);
+    int err = auth_message_assemble(bt_xp_conn->xporthdl, data, length);
 #else
-    int err = auth_xport_buffer_put(bt_xp_conn->xporthdl, uf, len);
+    int err = auth_xport_buffer_put(bt_xp_conn->xporthdl, data, length);
 #endif
 
 
