@@ -468,8 +468,7 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
         msg_frag.hdr.payload_len = payload_bytes;
 
         /* convert header to Big Endian, network byte order */
-        msg_frag.hdr.sync_flags = sys_cpu_to_be16(msg_frag.hdr.sync_flags);
-        msg_frag.hdr.payload_len = sys_cpu_to_be16(msg_frag.hdr.payload_len);
+        auth_message_hdr_to_be16(&msg_frag.hdr);
 
         /* send frame */
         send_ret = auth_xport_internal_send(xporthdl, (const uint8_t*)&msg_frag, fragment_bytes);
@@ -605,8 +604,7 @@ bool auth_message_get_fragment(const uint8_t *buffer, uint16_t buflen, uint16_t 
     }
 
     /* Put header vars into CPU byte order. */
-    frm_hdr->sync_flags = sys_be16_to_cpu(frm_hdr->sync_flags);
-    frm_hdr->payload_len = sys_be16_to_cpu(frm_hdr->payload_len);
+    auth_message_hdr_to_cpu(frm_hdr);
 
     /* Have a full fragment */
     *frag_beg_offset = cur_offset;
@@ -742,6 +740,24 @@ int auth_message_assemble(const auth_xport_hdl_t xporthdl, const uint8_t *buf, s
     }
 
     return recv_ret;
+}
+
+/**
+ * @see auth_internal.h
+ */
+void auth_message_hdr_to_cpu(struct auth_message_frag_hdr *frag_hdr)
+{
+    frag_hdr->sync_flags = sys_be16_to_cpu(frag_hdr->sync_flags);
+    frag_hdr->payload_len = sys_be16_to_cpu(frag_hdr->payload_len);
+}
+
+/**
+ * @see auth_internal.h
+ */
+void auth_message_hdr_to_be16(struct auth_message_frag_hdr *frag_hdr)
+{
+    frag_hdr->sync_flags = sys_cpu_to_be16(frag_hdr->sync_flags);
+    frag_hdr->payload_len = sys_cpu_to_be16(frag_hdr->payload_len);
 }
 
 #endif

@@ -275,6 +275,25 @@ bool auth_message_get_fragment(const uint8_t *buffer, uint16_t buflen, uint16_t 
  *         On error, negative value is returned.
  */
 int auth_message_assemble(const auth_xport_hdl_t xporthdl, const uint8_t *buf, size_t buflen);
+
+
+/**
+ * Swap the fragment header from Big Endian to the processor's byte
+ * ordering.
+ *
+ * @param  frag_hdr  Pointer to message fragment header.
+ */
+void auth_message_hdr_to_cpu(struct auth_message_frag_hdr *frag_hdr);
+
+
+/**
+ * Swaps the fragment header bytes to Big Endian order.
+ *
+ * @param  frag_hdr  Pointer to message fragment header.
+ */
+void auth_message_hdr_to_be16(struct auth_message_frag_hdr *frag_hdr);
+
+
 #endif
 
 
