@@ -109,21 +109,8 @@ int auth_lib_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_f
         return AUTH_ERROR_INVALID_PARAM;
     }
 
-#ifdef CONFIG_AUTH_DTLS
-    /* save off pointer to cert container if set */
-    struct auth_cert_container *certs = auth_conn->cert_cont;
-#endif
-
     /* init the struct to zero */
     memset(auth_conn, 0, sizeof(struct authenticate_conn));
-
-#ifdef CONFIG_AUTH_DTLS
-    /* Restore if not NULL*/
-    if(certs) {
-        auth_conn->cert_cont = certs;
-    }
-#endif
-
 
 
     // setup the status callback
@@ -139,7 +126,7 @@ int auth_lib_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_f
     auth_conn->auth_thread_func = auth_dtls_thead;
 
     // init TLS layer
-    err = auth_init_dtls_method(auth_conn);
+    int err = auth_init_dtls_method(auth_conn);
 
     if(err) {
         LOG_ERR("Failed to initialize MBed TLS, err: %d", err);
@@ -248,15 +235,6 @@ void auth_lib_set_status(struct authenticate_conn *auth_conn, enum auth_status s
     }
 }
 
-#if defined(CONFIG_AUTH_DTLS)
-/**
- * @see auth_lib.h
- */
-void auth_lib_set_tls_certs(struct authenticate_conn *auth_conn, struct auth_cert_container *certs)
-{
-    auth_conn->cert_cont = certs;
-}
-#endif
 
 /* ============ Simple ring buffer routines */
 

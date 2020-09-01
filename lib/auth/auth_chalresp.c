@@ -135,7 +135,7 @@ static bool auth_client_send_challenge(struct authenticate_conn *auth_conn, cons
 
     memcpy(&chal.client_challenge, random_chal, sizeof(chal.client_challenge));
 
-    /* send to peripheral */
+    /* send to server */
     numbytes = auth_xport_send(auth_conn->xport_hdl, (uint8_t*)&chal, sizeof(chal));
 
     if((numbytes <= 0) || (numbytes != sizeof(chal))) {

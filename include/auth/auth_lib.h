@@ -64,52 +64,13 @@ enum auth_status {
  };
 
 
-
 /**
-  * Enums of cert types.
-  */
-typedef enum
-{
-    AUTH_CERT_ROOT,         ///< The root certificate
-    AUTH_CERT_CA_CHAIN,     ///< The root CA chain, including the root certificate.
-    AUTH_CERT_INTERMEDIATE, ///< Intermediate CA.
-    AUTH_CERT_END_DEVICE    ///< End device cert, either server (Peripheral) or client (Central)
-} auth_cert_type_t;
-
-/**
- * @brief  Used to set X.509 certs for TLS/DTLS authentication.
- *
- * @note  Storing pointers to the certs in this struct vs. using tls_credentials.c.
- *        No need to include unnecessary network code.  Also, the tls_credential_get() function
- *        copies the cert into a buffer which is not needed.
+ * Defines used for DTLS/TLS authentication.
  */
-struct auth_tls_certs
-{
-    auth_cert_type_t  cert_type;
-    const char *cert_data;
-    uint32_t cert_len;
+#define AUTH_CERT_CA_CHAIN_TAG          1  /* Chain of certs to root cert, in PEM format */
+#define AUTH_DEVICE_CERT_TAG            2  /* Client or server cert, end entity. */
 
-    /**
-     * @brief  Optional key.  Set with the ATUH_CERT_END_DEVICE cert. For CA certs, should be NULL.
-     */
-    const char *private_key;    ///< Pointer to key in PEM format.
-    uint32_t key_len;
-};
 
-/* Container for all of the certs used */
-struct auth_cert_container
-{
-    /** @brief Count and pointer to array of CA certs.  The
-     *         order of the certs should match the cert chain, meaning the
-     *         root CA should be first followed by any intermediate CA
-     *         certs.
-     */
-    uint8_t num_ca_certs;   ///< number certs of 1 if passing a cert chain
-    struct auth_tls_certs *ca_certs;
-
-    /* either the server or client cert */
-    struct auth_tls_certs *device_cert;
-};
 
  /* Forward declaration */
 struct authenticate_conn;
@@ -118,7 +79,6 @@ struct authenticate_conn;
   * Authentication callback status function
   */
 typedef void (*auth_status_cb_t)(struct authenticate_conn *auth_conn, enum auth_status status, void *context);
-
 
 
 /**
@@ -153,16 +113,9 @@ struct authenticate_conn
     /* authentication thread for this connection */
     k_thread_entry_t auth_thread_func;
 
-
     /* Pointer to internal details, do not touch!!! */
-    // Is this used???
-    //void *internal_obj;
+    void *internal_obj;
 
-#if defined(CONFIG_AUTH_DTLS)
-    /* @brief Struct used to keep/point to all of the certs needed
-     * by the BLE device. */
-    struct auth_cert_container *cert_cont;
-#endif
 };
 
 
@@ -189,17 +142,6 @@ int auth_lib_init(struct authenticate_conn *auth_conn,
  */
 int auth_lib_deinit(struct authenticate_conn *auth_conn);
 
-#if defined(CONFIG_AUTH_DTLS)
-/**
- * For TLS/DLTS authentication sets the necessary certificates.  All certs should be
- * in PEM format.  The point should be valid during runtime.
- *
- * @param auth_conn   Pointer to Authentication connection struct.
- * @param certs       Pointer to certificates.  Pointer should be valid at all times.
- *
- */
-void auth_svc_set_tls_certs(struct authenticate_conn *auth_conn, struct auth_cert_container *certs);
-#endif
 
 /**
  * Starts the authentication process
@@ -228,14 +170,6 @@ enum auth_status auth_lib_get_status(struct authenticate_conn *auth_conn);
  */
 const char *auth_lib_getstatus_str(enum auth_status status);
 
-/**
- * Set the current authentication status, will also invoke the callback
- * to post status to the calling code.
- *
- * @param auth_conn   Authentication connection struct.
- * @param status      Authentication status.
- */
-void auth_svc_lib_status(struct authenticate_conn *auth_conn, enum auth_status status);
 
 /**
  * Cancels the authentication process.  Must wait until the AUTH_STATUS_CANCELED
@@ -248,7 +182,12 @@ void auth_svc_lib_status(struct authenticate_conn *auth_conn, enum auth_status s
 int auth_lib_cancel(struct authenticate_conn *auth_conn);
 
 
-
+/**
+ * Set the authentication status.
+ *
+ * @param auth_conn   Authentication connection struct.
+ * @param status      Authentication status.
+ */
 void auth_lib_set_status(struct authenticate_conn *auth_conn, enum auth_status status);
 
 #ifdef __cplusplus

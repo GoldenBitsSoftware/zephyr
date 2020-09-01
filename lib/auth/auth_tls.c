@@ -6,6 +6,7 @@
  */
 
 #include <zephyr/types.h>
+#include <sys/byteorder.h>
 #include <stddef.h>
 #include <string.h>
 #include <errno.h>
@@ -13,13 +14,7 @@
 #include <init.h>
 
 
-#include <bluetooth/bluetooth.h>
-#include <bluetooth/hci.h>
-#include <bluetooth/conn.h>
-#include <bluetooth/uuid.h>
-#include <bluetooth/gatt.h>
-#include <bluetooth/l2cap.h>
-#include <bluetooth/services/auth_svc.h>
+#include <net/tls_credentials.h>
 
 #if defined(CONFIG_MBEDTLS)
 #if !defined(CONFIG_MBEDTLS_CFG_FILE)
@@ -40,31 +35,18 @@
 #include <mbedtls/entropy.h>
 #include <mbedtls/timing.h>
 
-#define LOG_LEVEL CONFIG_BT_GATT_AUTHS_LOG_LEVEL
+#define LOG_LEVEL CONFIG_AUTH_LOG_LEVEL
 #include <logging/log.h>
-LOG_MODULE_DECLARE(auth_svc, CONFIG_BT_GATT_AUTHS_LOG_LEVEL);
+LOG_MODULE_DECLARE(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 
+#include <auth/auth_lib.h>
 #include "auth_internal.h"
 
 
 #define MAX_MBEDTLS_CONTEXT     5
 
 
-#define TLS_FRAME_SIZE          256u  /* should be at least as large as teh MTU */
-
-#define TLS_FRAME_SYNC_BITS     0xA590
-#define TLS_FRAME_SYNC_MASK     0xFFF0
-#define TLS_FRAME_BEGIN         0x01
-#define TLS_FRAME_NEXT          0x02
-#define TLS_FRAME_END           0x04
-
-#pragma pack(push, 1)
-struct auth_tls_frame {
-    /* bits 15-4  are for frame sync, bits 3-0 are flags */
-    uint16_t frame_hdr;  /// bytes to insure we're at a frame
-    uint8_t frame_payload[TLS_FRAME_SIZE];  /* TODO: Create #define for this */
-};
-#pragma pack(pop)
+#define USE_DTLS        1  /* TODO: Make this a KConfig var */
 
 
 
@@ -88,8 +70,6 @@ struct mbed_tls_context {
 
 static struct mbed_tls_context tlscontext[MAX_MBEDTLS_CONTEXT];
 
-
-void auth_svc_internal_status_callback(struct authenticate_conn *auth_con , auth_status_t status);
 
 
 
@@ -273,6 +253,21 @@ static void auth_mbed_debug(void *ctx, int level, const char *file,
 }
 
 
+#pragma pack(push, 1)
+#define DTLS_PACKET_SYNC_BYTES      0x45B8
+#define DTLS_HEADER_BYTES           (sizeof(struct dtls_packet_hdr))
+
+/**
+ * Header identifying a DTLS packet (aka datagram).  Unlike TLS, DTLS packets
+ * must be forwarded to Mbedtls as one or more complete packets.  TLS is
+ * design to handle an incoming byte stream.
+ */
+struct dtls_packet_hdr {
+    uint16_t sync_bytes;    /* use magic number to identify header */
+    uint16_t packet_len;    /* size of DTLS datagram */
+};
+#pragma pack(pop)
+
 /**
  * Mbed routine to send data, called by Mbed TLS library.
  *
@@ -284,232 +279,118 @@ static void auth_mbed_debug(void *ctx, int level, const char *file,
  */
 static int auth_mbedtls_tx(void *ctx, const uint8_t *buf, size_t len)
 {
+    int send_cnt;
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
-    int frame_bytes;
-    int payload_bytes;
-    int send_count = 0;
-    int num_frames = 0;
-    int tx_ret;
-    struct auth_tls_frame frame;
-    const uint16_t max_frame = MIN(sizeof(frame), auth_conn->payload_size);
-    const uint16_t max_payload = max_frame - sizeof(frame.frame_hdr);
 
-    /* set frame header */
-    frame.frame_hdr = TLS_FRAME_SYNC_BITS|TLS_FRAME_BEGIN;
+#ifdef USE_DTLS
+    uint8_t dtls_temp_buf[600];  /* make 600 config var */
+    struct dtls_packet_hdr *dtls_hdr = (struct dtls_packet_hdr *)dtls_temp_buf;
 
-    while (len > 0) {
+    /* set byte order to Big Endian when sending over lower transport. */
+    dtls_hdr->sync_bytes = sys_cpu_to_be16(DTLS_PACKET_SYNC_BYTES);
+    dtls_hdr->packet_len = sys_cpu_to_be16((uint16_t)len);  /* does not include header */
 
-        /* get payload bytes */
-        payload_bytes = MIN(max_payload, len);
+    memcpy(&dtls_temp_buf[DTLS_HEADER_BYTES], buf, len);
 
-        frame_bytes = payload_bytes + sizeof(frame.frame_hdr);
-
-        /* is this the last frame? */
-        if((len - payload_bytes) == 0) {
-            frame.frame_hdr = TLS_FRAME_SYNC_BITS|TLS_FRAME_END;
-
-            // now check if we're only sending one frame, then set the frame
-            // beg flag
-            if(num_frames == 0) {
-                frame.frame_hdr |= TLS_FRAME_BEGIN;
-            }
-        }
-
-        /* copy body */
-        memcpy(frame.frame_payload, buf, payload_bytes);
-
-#if defined(CONFIG_BT_GATT_CLIENT)
-        /* send frame */
-        tx_ret = auth_central_tx(auth_conn, (const uint8_t*)&frame, frame_bytes);
+    /* send to peripheral */
+    send_cnt = auth_xport_send(auth_conn->xport_hdl, dtls_temp_buf, len + DTLS_HEADER_BYTES);
 #else
-        /* send frame */
-        tx_ret = auth_periph_tx(auth_conn, (const uint8_t*)&frame, frame_bytes);
+    /* TLS - just send, no need to worry about DTLS IP packet boundary.
+     * TLS can handle a steam of bytes. */
+    send_cnt = auth_xport_send(auth_conn->xport_hdl, buf, len);
 #endif
 
-        if(tx_ret < 0) {
-            LOG_ERR("Failed to send TLS frame, error: %d", tx_ret);
-            return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
-        }
-
-        /* verify all bytes were sent */
-        if(tx_ret != frame_bytes) {
-            LOG_ERR("Failed to to send all bytes, send: %d, requested: %d", tx_ret, frame_bytes);
-            return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
-        }
-
-        /* set next flags */
-        frame.frame_hdr = TLS_FRAME_SYNC_BITS|TLS_FRAME_NEXT;
-
-        len -= payload_bytes;
-        buf += payload_bytes;
-        send_count += payload_bytes;
-        num_frames++;
+    if(send_cnt < 0){
+        return -1;  /* TODO: Return the correct MBED error code */
     }
 
-    LOG_INF("Bytes sent: %d", send_count);
-
-    return send_count;
+    /* return number bytes sent, do not include the DTLS header */
+    return (send_cnt - DTLS_HEADER_BYTES);
 }
-
-// DAG DEBUG BEG
-#define DTLS_PACKET_MARKER      0x45B86A3E
-typedef struct {
-    uint32_t marker;            // use magic number to identify header
-    uint16_t packet_len;
-} dtls_packet_hdr_t;
 
 
 static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
 {
-    int rx_bytes;
-    dtls_packet_hdr_t dtls_hdr;
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
+    int rx_bytes = 0;
 
-#if defined(CONFIG_BT_GATT_CLIENT)
-    rx_bytes = auth_central_rx(auth_conn, (uint8_t*)&dtls_hdr, sizeof(dtls_hdr));
-#else
-    rx_bytes = auth_periph_rx(auth_conn, (uint8_t*) &dtls_hdr, sizeof(dtls_hdr));
-#endif
+#ifndef USE_DTLS
+    /* For TLS just copy bytes, no need to handle DTLS packet boundary. */
+    rx_bytes = auth_xport_recv(auth_conn->xport_hdl, buffer, len, 30000);
 
-    /* TODO: Refactor this entire routine, should read as many
-     * whole packets as possible if there's enough room */
-    if(rx_bytes == sizeof(dtls_hdr)) {
-
-        if(dtls_hdr.marker != DTLS_PACKET_MARKER) {
-
-            /* Question: Should the entire receive buffer be flushed? */
-            LOG_ERR("Missing DTLS header.");
-            return 0;
-        }
-
-        /* read the packet */
-#if defined(CONFIG_BT_GATT_CLIENT)
-        rx_bytes = auth_central_rx(auth_conn, buffer, dtls_hdr.packet_len);
-#else
-        rx_bytes = auth_periph_rx(auth_conn, buffer, dtls_hdr.packet_len);
-#endif
-
-    } else if (rx_bytes == 0) {
-        LOG_ERR("Received zero bytes.");
-    }
-
-    /* check for error */
     if(rx_bytes < 0) {
-        LOG_ERR("Failed to receive TLS frame, error: %d", rx_bytes);
-
-        if(rx_bytes == -EAGAIN) {
-            return MBEDTLS_ERR_SSL_TIMEOUT;
-        }
-
-        return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+        /* some error, return correct MBedtls code */
+        /* might be just a simple time-out */
+        return 0;
     }
-
-// DAG DEBUG BEG
-        LOG_ERR("** read: %d, requested: %d", rx_bytes, len);
-        if(rx_bytes > 530) {
-            LOG_ERR("** read more than 530 bytes, total: %d", rx_bytes);
-        }
-// DAG DEBUG END
 
     return rx_bytes;
-}
 
-
-#if 0
-/**
- *  MBed TLS receive function, called by the MBed library to receive data.
- *
- * @param ctx      Context pointer, pointer to struct authenticate_conn
- * @param buffer   Buffer to copy received bytes.
- * @param len      Byte sizeof buffer.
- *
- * @return         Number of bytes copied into the buffer or MBED error.
- */
-static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
-{
-    struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
-    bool last_frame = false;
-    bool first_frame = true;
-    int rx_bytes;
-    int receive_cnt = 0;
-    struct auth_tls_frame frame;
-    static uint32_t frame_bytes;
-
-    frame_bytes = 0;
-    while(!last_frame && len != 0U) {
-
-        rx_bytes = MIN(sizeof(frame.frame_payload), len) + sizeof(frame.frame_hdr);
-
-#if defined(CONFIG_BT_GATT_CLIENT)
-        rx_bytes = auth_central_rx(auth_conn, (uint8_t*)&frame, rx_bytes);
 #else
-        rx_bytes = auth_periph_rx(auth_conn, (uint8_t*)&frame, rx_bytes);
-#endif
 
-        /* check for error */
+    struct dtls_packet_hdr dtls_hdr;
+    int total_bytes_returned = 0;
+    uint16_t packet_len = 0;
+
+    while(true) {
+
+        rx_bytes = auth_xport_getnum_recvqueue_bytes(auth_conn->xport_hdl);
+
         if(rx_bytes < 0) {
-            LOG_ERR("Failed to receive TLS frame, error: %d", rx_bytes);
+            /* an error occurred */
+            return rx_bytes;
+        }
 
-            if(rx_bytes == -EAGAIN) {
-                return MBEDTLS_ERR_SSL_TIMEOUT;
+        if(rx_bytes < DTLS_HEADER_BYTES) {
+            return total_bytes_returned;
+        }
+
+        /* peek into receive queue */
+        auth_xport_recv_peek(auth_conn->xport_hdl, (uint8_t*)&dtls_hdr, sizeof(struct dtls_packet_hdr));
+
+        /* check for sync bytes */
+        if( sys_be16_to_cpu(dtls_hdr.sync_bytes) != DTLS_PACKET_SYNC_BYTES) {
+            // read bytes and try to peek again
+            auth_xport_recv(auth_conn->xport_hdl, (uint8_t*)&dtls_hdr, sizeof(struct dtls_packet_hdr), 1000u);
+            continue;
+        }
+
+        // have valid DTLS packet header, check packet length
+        dtls_hdr.packet_len = sys_be16_to_cpu(dtls_hdr.packet_len);
+
+        /* Is there enough room to copy into Mbedtls buffer? */
+        if(dtls_hdr.packet_len > len) {
+            return total_bytes_returned;
+        }
+
+        /* rx_bytes must be at least DTLS_HEADER_BYTES in length  here */
+        if((int)dtls_hdr.packet_len < (rx_bytes - (int)DTLS_HEADER_BYTES)) {
+
+            packet_len = dtls_hdr.packet_len;
+
+            /* copy packet into mbed buffers */
+            /* read header, do not forward to Mbed */
+            auth_xport_recv(auth_conn->xport_hdl, (uint8_t*)&dtls_hdr, sizeof(struct dtls_packet_hdr), 1000u);
+
+            /* read packet into mbed buffer*/
+            rx_bytes = auth_xport_recv(auth_conn->xport_hdl, buffer, packet_len, 1000u);
+
+            if(rx_bytes <= 0) {
+                /* an error occurred */
+                return total_bytes_returned;
             }
 
-            return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
-        }
-
-        /* check for start flag */
-        if(first_frame) {
-            first_frame = false;
-            if(!(frame.frame_hdr & TLS_FRAME_BEGIN)) {
-                LOG_ERR("Missing beginning frame");
-                return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
-            }
-            LOG_DBG("Got BEGIN frame.");
-            frame_bytes = 0;
-        }
-
-        /* check frame sync bytes */
-        if((frame.frame_hdr & TLS_FRAME_SYNC_MASK) != TLS_FRAME_SYNC_BITS) {
-            LOG_ERR("Invalid frame.");
-            return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
-        }
-
-        /* Subtract out frame header */
-        rx_bytes -= sizeof(frame.frame_hdr);
-
-        /* sanity check, if zero or negative */
-        if(rx_bytes <= 0) {
-            LOG_ERR("Empty frame!!");
-            return receive_cnt;
-        }
-
-        /* copy payload bytes */
-        memcpy(buffer, frame.frame_payload, rx_bytes);
-        
-
-        len -= rx_bytes;
-        receive_cnt += rx_bytes;
-        buffer += rx_bytes;
-        frame_bytes += rx_bytes;
-
-        /* Is this the last frame? */
-        if(frame.frame_hdr & TLS_FRAME_END) {
-            last_frame = true;
-            LOG_DBG("Got LAST frame, total bytes: %d", frame_bytes);
+            total_bytes_returned += rx_bytes;
+            len -= rx_bytes;
+            buffer += rx_bytes;
         }
     }
 
-    if(len == 0U && !last_frame) {
-        LOG_ERR("Receive buffer from Mbed not large enough.");
-        return MBEDTLS_ERR_SSL_BUFFER_TOO_SMALL;
-    }
-
-    LOG_DBG("Received %d bytes.", receive_cnt);
-
-    return receive_cnt;
-}
+    return total_bytes_returned;
 #endif
-// DAG DEBUG END
+}
+
+
 
 /**
  * Set the DTLS cookie.
@@ -562,6 +443,8 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
 {
     struct mbed_tls_context *mbed_ctx;
     int ret;
+    uint8_t *cred_val;
+    size_t cred_len;
 
     LOG_DBG("Initializing Mbed");
 
@@ -573,10 +456,6 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
         return AUTH_ERROR_NO_RESOURCE;
     }
 
-    if (auth_conn->cert_cont == NULL) {
-        LOG_ERR("Device certs not set.");
-        return AUTH_ERROR_INVALID_PARAM;
-    }
 
     /* Init mbed context */
     auth_init_context(mbed_ctx);
@@ -587,7 +466,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
      * Challenge-Response.*/
     auth_conn->internal_obj = mbed_ctx;
 
-    int endpoint = auth_conn->is_central ? MBEDTLS_SSL_IS_CLIENT : MBEDTLS_SSL_IS_SERVER;
+    int endpoint = auth_conn->is_client ? MBEDTLS_SSL_IS_CLIENT : MBEDTLS_SSL_IS_SERVER;
 
     mbedtls_ssl_config_defaults(&mbed_ctx->conf,
                                 endpoint,
@@ -610,8 +489,19 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
      * Production code should set a proper ca chain and use REQUIRED. */
     mbedtls_ssl_conf_authmode(&mbed_ctx->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
 
-    ret = mbedtls_pk_parse_key(&mbed_ctx->device_private_key, auth_conn->cert_cont->device_cert->private_key,
-                               auth_conn->cert_cont->device_cert->key_len, NULL, 0);
+    /**
+     * Get pointer to device private key.
+     */
+    ret = tls_credential_get_info(AUTH_DEVICE_CERT_TAG, TLS_CREDENTIAL_PRIVATE_KEY, &cred_val, &cred_len);
+
+    if(ret) {
+        auth_free_mbedcontext(mbed_ctx);
+        LOG_ERR("Failed to get device private key, error: %d\n", ret);
+        return AUTH_ERROR_DTLS_INIT_FAILED;
+    }
+
+
+    ret = mbedtls_pk_parse_key(&mbed_ctx->device_private_key, cred_val, cred_len, NULL, 0);
 
     if (ret) {
         auth_free_mbedcontext(mbed_ctx);
@@ -622,35 +512,38 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
     /**
      * @brief Setup device certs, the CA chain followed by the end device cert.
      */
-    if (auth_conn->cert_cont->num_ca_certs == 0u) {
-        /* log a warning, this maybe intentional */
-        LOG_WRN("No CA certs.");
+    ret = tls_credential_get_info(AUTH_CERT_CA_CHAIN_TAG, TLS_CREDENTIAL_CA_CERTIFICATE, &cred_val, &cred_len);
+
+    if(ret) {
+        auth_free_mbedcontext(mbed_ctx);
+        LOG_ERR("Failed to get cert CA chain, error: %d\n", ret);
+        return AUTH_ERROR_DTLS_INIT_FAILED;
     }
 
-    for (uint8_t cnt = 0; cnt < auth_conn->cert_cont->num_ca_certs; cnt++) {
-        /* Check if this is a device cert */
-        if (auth_conn->cert_cont->ca_certs[cnt].cert_type == AUTH_CERT_END_DEVICE) {
-            LOG_WRN("End-Device cert being used as CA cert.");
-        }
+    /* Parse and set the CA certs */
+    ret = mbedtls_x509_crt_parse(&mbed_ctx->cacert, cred_val, cred_len);
 
-        /* Parse and set the CA certs */
-        ret = mbedtls_x509_crt_parse(&mbed_ctx->cacert, auth_conn->cert_cont->ca_certs[cnt].cert_data,
-                                     auth_conn->cert_cont->ca_certs[cnt].cert_len);
-
-        if (ret) {
-            auth_free_mbedcontext(mbed_ctx);
-            LOG_ERR("Failed to parse CA cert, error: 0x%x", ret);
-            return AUTH_ERROR_DTLS_INIT_FAILED;
-        }
+    if (ret) {
+        auth_free_mbedcontext(mbed_ctx);
+        LOG_ERR("Failed to parse CA cert, error: 0x%x", ret);
+        return AUTH_ERROR_DTLS_INIT_FAILED;
     }
 
     /* set CA certs into context */
     mbedtls_ssl_conf_ca_chain(&mbed_ctx->conf, &mbed_ctx->cacert, NULL);
 
-    /* Parse the device cert */
+    /* Get and parse the device cert */
+    ret = tls_credential_get_info(AUTH_DEVICE_CERT_TAG, TLS_CREDENTIAL_SERVER_CERTIFICATE, &cred_val, &cred_len);
+
+    if(ret) {
+        auth_free_mbedcontext(mbed_ctx);
+        LOG_ERR("Failed to get device cert, error: %d\n", ret);
+        return AUTH_ERROR_DTLS_INIT_FAILED;
+    }
+
     ret = mbedtls_x509_crt_parse(&mbed_ctx->device_cert,
-                                 (const unsigned char *) auth_conn->cert_cont->device_cert->cert_data,
-                                 auth_conn->cert_cont->device_cert->cert_len);
+                                 (const unsigned char *)cred_val, cred_len);
+
 
     if (ret) {
         auth_free_mbedcontext(mbed_ctx);
@@ -676,7 +569,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
     mbedtls_debug_set_threshold(0); // Should be KConfig option
 #endif
 
-    if (!auth_conn->is_central) {
+    if (!auth_conn->is_client) {
 
         ret = mbedtls_ssl_cookie_setup(&mbed_ctx->cookie_ctx, mbedtls_ctr_drbg_random, &mbed_ctx->ctr_drbg);
 
@@ -729,7 +622,7 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
      * For the central (client), a client hello will be sent immediately.
      */
 
-    if (!auth_conn->is_central) {
+    if (!auth_conn->is_client) {
 
         /**
          * For the peripheral (acting as a the DTLS server), use the connection handle
@@ -739,24 +632,20 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
 
         if(ret) {
             LOG_ERR("Failed to get connection info for DTLS cookie, auth failed, error: 0x%x", ret);
-            auth_svc_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
+            auth_lib_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
             return;
         }
 
-        int bytecount = auth_svc_buffer_bytecount_wait(&auth_conn->rx_buf, 15000u);
+        int bytecount = auth_xport_getnum_recvqueue_bytes_wait(auth_conn->xport_hdl, 15000u);
+
 
         if(bytecount <= 0) {
             LOG_ERR("Peripheral did not receive initial Client Hello, auth failed, error: %d", bytecount);
-            auth_svc_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
+            auth_lib_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
             return;
         }
 
         LOG_DBG("Peripheral received initial Client Hello from central.");
-    }
-
-    /*  Check if th payload size has been set*/
-    if(auth_conn->payload_size == 0U) {
-        auth_conn->payload_size = bt_gatt_get_mtu(auth_conn->conn) - BLE_LINK_HEADER_BYTES;
     }
 
     // DAG DEBUG BEG
@@ -844,123 +733,5 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
     return;
 }
 
-// DAG DEBUG BEG
-static uint8_t dump_buffer[700];
 
-
-static uint8_t rx_buf[600];
-static uint32_t rx_curr_offset;
-static bool rx_first_frame = true;
-int auth_dtls_receive_frame(struct authenticate_conn *auth_conn, const uint8_t *buffer, size_t buflen)
-{
-    struct auth_tls_frame *rx_frame;
-    int free_buf_space;
-    dtls_packet_hdr_t *dtls_hdr = NULL;
-
-    // read a frame from the peer
-    rx_frame = (struct auth_tls_frame *)buffer;
-
-    /* check for start flag */
-    if(rx_first_frame) {
-        rx_first_frame = false;
-        if(!(rx_frame->frame_hdr & TLS_FRAME_BEGIN)) {
-
-            /* reset vars */
-            rx_curr_offset = sizeof(dtls_packet_hdr_t);
-            rx_first_frame = true;
-
-            LOG_ERR("RX-Missing beginning frame");
-            return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
-        }
-
-        LOG_DBG("RX-Got BEGIN frame.");
-        rx_curr_offset = sizeof(dtls_packet_hdr_t);
-    }
-
-    /* check frame sync bytes */
-    if((rx_frame->frame_hdr & TLS_FRAME_SYNC_MASK) != TLS_FRAME_SYNC_BITS) {
-        /* reset vars */
-        rx_curr_offset = sizeof(dtls_packet_hdr_t);
-        rx_first_frame = true;
-
-        LOG_ERR("RX-Invalid frame.");
-        return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
-    }
-
-    /* Subtract out frame header */
-    buflen -= sizeof(rx_frame->frame_hdr);
-
-    /* move beyond frame header */
-    buffer += sizeof(rx_frame->frame_hdr);
-
-    /* sanity check, if zero or negative */
-    if(buflen <= 0) {
-        /* reset vars */
-        rx_curr_offset = sizeof(dtls_packet_hdr_t);
-        rx_first_frame = true;
-        LOG_ERR("RX-Empty frame!!");
-        return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
-    }
-
-    /* ensure there's enough free space in our temp buffer */
-    free_buf_space = sizeof(rx_buf) - rx_curr_offset;
-
-    if(free_buf_space < buflen) {
-        /* reset vars */
-        rx_curr_offset = sizeof(dtls_packet_hdr_t);
-        rx_first_frame = true;
-        LOG_ERR("RX-not enough free space");
-        return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
-    }
-
-    /* copy payload bytes */
-    memcpy(rx_buf + rx_curr_offset, buffer, buflen);
-
-    rx_curr_offset += buflen;
-
-    /* Is this the last frame? */
-    if(rx_frame->frame_hdr & TLS_FRAME_END) {
-
-        /* log number payload bytes received, don't include dtls header */
-        LOG_DBG("RX-Got LAST frame, total bytes: %d", rx_curr_offset - sizeof(dtls_packet_hdr_t));
-
-        int free_bytes = auth_svc_buffer_avail_bytes(&auth_conn->rx_buf);
-
-
-        /* Is there enough free space to write record? */
-        if(free_bytes >=  rx_curr_offset) {
-
-            /* Header is at beginning of the rx buffer */
-            dtls_hdr = (dtls_packet_hdr_t *)rx_buf;
-
-            dtls_hdr->marker = DTLS_PACKET_MARKER;
-            dtls_hdr->packet_len = rx_curr_offset - sizeof(dtls_packet_hdr_t);
-
-            /* copy into receive buffer */
-            auth_svc_buffer_put(&auth_conn->rx_buf, rx_buf, rx_curr_offset);
-
-        } else {
-            int need = rx_curr_offset - free_bytes;
-            LOG_ERR("Not enough room in RX buffer, free: %d, need %d bytes.", free_bytes, need);
-
-            // DAG DEBUG BEG
-            while(auth_svc_buffer_bytecount(&auth_conn->rx_buf) > 0) {
-
-                // start dumping contents of buffer
-                int dumpbyte_cnt = auth_mbedtls_rx(auth_conn, dump_buffer, sizeof(dump_buffer));
-
-                LOG_ERR("**Dumped %d bytes", dumpbyte_cnt);
-            }
-            // DAG DEUBG END
-        }
-
-        /* reset vars */
-        rx_curr_offset = sizeof(dtls_packet_hdr_t);
-        rx_first_frame = true;
-    }
-
-    return 0;
-}
-
-// DAG DEBUG END
 

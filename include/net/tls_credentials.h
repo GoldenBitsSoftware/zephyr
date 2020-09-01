@@ -108,6 +108,20 @@ int tls_credential_get(sec_tag_t tag, enum tls_credential_type type,
 		       void *cred, size_t *credlen);
 
 /**
+ * Get TLS credential information.
+ *
+ * @param tag       A security tag of requested credential.
+ * @param type      A TLS/DTLS credential type of requested credential.
+ * @param cred_val  Set pointer to credential value.
+ * @param cred_len  Size of credential set here.
+ *
+ * @retval 0 TLS credential successfully obtained.
+ * @retval -ENOENT Requested TLS credential was not found.
+ */
+int tls_credential_get_info(sec_tag_t tag, enum tls_credential_type type,
+                            uint8_t **cred_val, size_t *cred_len);
+
+/**
  * @brief Delete a TLS credential.
  *
  * @details This function removes a TLS credential, referenced by @p tag

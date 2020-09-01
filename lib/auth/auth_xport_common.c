@@ -174,10 +174,15 @@ static int auth_xport_buffer_put(struct auth_xport_io_buffer *iobuf, const uint8
     return (int)total_copied;
 }
 
-
-static int auth_xport_buffer_get(struct auth_xport_io_buffer *iobuf, uint8_t *out_buf, size_t num_bytes)
+/**
+ * NOTE: We can probably merge this function with auth_xport_buffer_get() below.
+ *       Just set the "peek" flag.
+ */
+static int auth_xport_buffer_peek(struct auth_xport_io_buffer *iobuf, uint8_t *out_buf, size_t num_bytes)
 {
-    // if no valid bytes, just return zero
+    bool peek = true;
+
+    /* if no valid bytes, just return zero */
     if(iobuf->num_valid_bytes == 0) {
         return 0;
     }
@@ -188,7 +193,92 @@ static int auth_xport_buffer_get(struct auth_xport_io_buffer *iobuf, uint8_t *ou
         return err;
     }
 
-    // number bytes to copy
+    /* number bytes to copy */
+    uint32_t copy_cnt = MIN(iobuf->num_valid_bytes, num_bytes);
+    uint32_t total_copied = 0;
+    uint32_t byte_cnt = 0;
+
+    if(iobuf->head_index <= iobuf->tail_index) {
+
+        /* How may bytes are available? */
+        byte_cnt = XPORT_IOBUF_LEN - iobuf->tail_index;
+
+        if(byte_cnt > copy_cnt) {
+            byte_cnt = copy_cnt;
+        }
+
+        /* copy from tail to end of buffer */
+        memcpy(out_buf, iobuf->io_buffer + iobuf->tail_index, byte_cnt);
+
+        if(!peek) {
+            /* update tail index */
+            iobuf->tail_index += byte_cnt;
+        }
+
+        out_buf += byte_cnt;
+        total_copied += byte_cnt;
+
+        /* update copy count and num valid bytes */
+        copy_cnt -= byte_cnt;
+
+        if(!peek) {
+            iobuf->num_valid_bytes -= byte_cnt;
+        }
+
+        /* wrapped around, copy from beginning of buffer until
+           copy_count is satisfied */
+        if(copy_cnt > 0) {
+
+            memcpy(out_buf, iobuf->io_buffer, copy_cnt);
+
+            if(!peek) {
+                iobuf->tail_index = copy_cnt;
+                iobuf->num_valid_bytes -= copy_cnt;
+            }
+
+            total_copied += copy_cnt;
+        }
+
+    } else if(iobuf->head_index > iobuf->tail_index) {
+
+        byte_cnt = iobuf->head_index - iobuf->tail_index;
+
+        if(byte_cnt > copy_cnt) {
+            byte_cnt = copy_cnt;
+        }
+
+        memcpy(out_buf, iobuf->io_buffer + iobuf->tail_index, byte_cnt);
+
+        total_copied += byte_cnt;
+        copy_cnt -= byte_cnt;
+
+        if(!peek) {
+            iobuf->tail_index += byte_cnt;
+            iobuf->num_valid_bytes -= byte_cnt;
+        }
+    }
+
+    /* unlock */
+    k_mutex_unlock(&iobuf->buf_mutex);
+
+    return (int)total_copied;
+
+}
+
+static int auth_xport_buffer_get(struct auth_xport_io_buffer *iobuf, uint8_t *out_buf, size_t num_bytes)
+{
+    /* if no valid bytes, just return zero */
+    if(iobuf->num_valid_bytes == 0) {
+        return 0;
+    }
+
+    /* lock mutex */
+    int err = k_mutex_lock(&iobuf->buf_mutex, K_FOREVER);
+    if(err) {
+        return err;
+    }
+
+    /* number bytes to copy */
     uint32_t copy_cnt = MIN(iobuf->num_valid_bytes, num_bytes);
     uint32_t total_copied = 0;
     uint32_t byte_cnt = 0;
@@ -246,7 +336,8 @@ static int auth_xport_buffer_get(struct auth_xport_io_buffer *iobuf, uint8_t *ou
 }
 
 
-static int auth_xport_buffer_get_wait(struct auth_xport_io_buffer *iobuf, uint8_t *out_buf,  int num_bytes, int waitmsec)
+static int auth_xport_buffer_get_wait(struct auth_xport_io_buffer *iobuf, uint8_t *out_buf,
+                                      int num_bytes, int waitmsec)
 {
     /* return any bytes that might be sitting in the buffer */
     int bytecount = auth_xport_buffer_get(iobuf, out_buf, num_bytes);
@@ -285,6 +376,31 @@ static int auth_xport_buffer_bytecount(struct auth_xport_io_buffer *iobuf)
 
     return err;
 }
+
+/**
+ * Wait for bytes to be
+ * @return
+ */
+static int auth_xport_buffer_bytecount_wait(struct auth_xport_io_buffer *iobuf, uint32_t waitmsec)
+{
+    int num_bytes = auth_xport_buffer_bytecount(iobuf);
+
+    /* an error occurred or there are bytes sitting in the io uffer. */
+    if(num_bytes != 0) {
+        return num_bytes;
+    }
+
+    /* wait for byte to fill the io buffer */
+     int err = k_sem_take(&iobuf->buf_sem, K_MSEC(waitmsec));
+
+    if (err) {
+        return err;  /* timed out -EAGAIN or error */
+    }
+
+    /* return the number of bytes in the queue */
+    return auth_xport_buffer_bytecount(iobuf);
+}
+
 
 
 static int auth_xport_buffer_avail_bytes(struct auth_xport_io_buffer *iobuf)
@@ -537,6 +653,22 @@ int auth_xport_recv(const auth_xport_hdl_t xporthdl, uint8_t *buf, uint32_t buf_
 /**
  * @see auth_xport.h
  */
+int auth_xport_recv_peek(const auth_xport_hdl_t xporthdl, uint8_t *buff, uint32_t buf_len)
+{
+    struct auth_xport_instance *xp_inst = (struct auth_xport_instance *)xporthdl;
+
+    if(xp_inst == NULL) {
+        return AUTH_ERROR_INVALID_PARAM;
+    }
+
+    int ret = auth_xport_buffer_peek(&xp_inst->recv_buf, buff, buf_len);
+
+    return ret;
+}
+
+/**
+ * @see auth_xport.h
+ */
 int auth_xport_getnum_send_queued_bytes(const auth_xport_hdl_t xporthdl)
 {
     struct auth_xport_instance *xp_inst = (struct auth_xport_instance *)xporthdl;
@@ -550,6 +682,37 @@ int auth_xport_getnum_send_queued_bytes(const auth_xport_hdl_t xporthdl)
     return numbytes;
 }
 
+/**
+ * @see auth_xport.h
+ */
+int auth_xport_getnum_recvqueue_bytes(const auth_xport_hdl_t xporthdl)
+{
+    struct auth_xport_instance *xp_inst = (struct auth_xport_instance *)xporthdl;
+
+    if(xp_inst == NULL) {
+        return AUTH_ERROR_INVALID_PARAM;
+    }
+
+    int numbytes = auth_xport_buffer_bytecount(&xp_inst->recv_buf);
+
+    return numbytes;
+}
+
+/**
+ * @see auth_xport.h
+ */
+int auth_xport_getnum_recvqueue_bytes_wait(const auth_xport_hdl_t xporthdl, uint32_t waitmsec)
+{
+    struct auth_xport_instance *xp_inst = (struct auth_xport_instance *)xporthdl;
+
+    if(xp_inst == NULL) {
+        return AUTH_ERROR_INVALID_PARAM;
+    }
+
+    int numbytes = auth_xport_buffer_bytecount_wait(&xp_inst->recv_buf, waitmsec);
+
+    return numbytes;
+}
 
 
 

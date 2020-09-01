@@ -135,6 +135,19 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
  */
 int auth_xport_recv(const auth_xport_hdl_t xporthdl, uint8_t *buff, uint32_t buf_len, uint32_t timeoutMsec);
 
+
+/**
+ * Peeks at the contents of the receive queue used by the lower transport.  The
+ * data returned is not removed from the receive queue.
+ *
+ * @param xporthdl  Transport handle
+ * @param buff      Buffer to read bytes into.
+ * @param buf_len   Size of buffer.
+ *
+  * @return Negative on error or timeout, else number of bytes peeked.
+ */
+int auth_xport_recv_peek(const auth_xport_hdl_t xporthdl, uint8_t *buff, uint32_t buf_len);
+
 /**
  * Used by lower transport to put bytes reveived into rx queue.
  *
@@ -157,6 +170,25 @@ int auth_xport_put_recv(const auth_xport_hdl_t xporthdl, const uint8_t *buf, siz
 int auth_xport_getnum_send_queued_bytes(const auth_xport_hdl_t xporthdl);
 
 
+/**
+ * Get the number of bytes in the receive queue
+ *
+ * @param xporthdl  Transport handle.
+ *
+ * @return  Number of queued bytes, negative value on error.
+ */
+int auth_xport_getnum_recvqueue_bytes(const auth_xport_hdl_t xporthdl);
+
+/**
+ * Get the number of bytes in the receive queue, if no byte wait until
+ * bytes are received or time out.
+ *
+ * @param xporthdl  Transport handle.l
+ * @param waitmsec  Number of milliseconds to wait.
+ *
+ * @return  Number of queued bytes, negative value on error.
+ */
+int auth_xport_getnum_recvqueue_bytes_wait(const auth_xport_hdl_t xporthdl, uint32_t waitmsec);
 
 /**
  * Sets a direct send function to the lower transport layer instead of

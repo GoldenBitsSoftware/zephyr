@@ -143,6 +143,31 @@ exit:
 	return ret;
 }
 
+
+int tls_credential_get_info(sec_tag_t tag, enum tls_credential_type type,
+                            uint8_t **cred_val, size_t *cred_len)
+{
+    struct tls_credential *credential;
+    int ret = 0;
+
+    credentials_lock();
+
+    credential = credential_get(tag, type);
+    if (credential == NULL) {
+        ret = -ENOENT;
+        goto exit;
+    }
+
+    *cred_val = (uint8_t*)credential->buf;
+    *cred_len = credential->len;
+
+exit:
+    credentials_unlock();
+
+    return ret;
+}
+
+
 int tls_credential_delete(sec_tag_t tag, enum tls_credential_type type)
 {
 	struct tls_credential *credential;
