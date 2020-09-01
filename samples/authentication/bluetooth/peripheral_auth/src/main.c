@@ -21,20 +21,19 @@
 #include <bluetooth/gatt.h>
 #include <bluetooth/l2cap.h>
 
+#include <net/tls_credentials.h>
+
 
 #include <logging/log.h>
 #include <logging/log_ctrl.h>
 
 #include <auth/auth_lib.h>
 
+
 LOG_MODULE_REGISTER(periph_auth, CONFIG_AUTH_LOG_LEVEL);
 
 #if defined(CONFIG_AUTH_DTLS)
-#include "../cert_chain/ble_auth_all_certs/bleauth_ca_chain.h"
-#include "../cert_chain/ble_auth_all_certs/bleauth_central_cert.h"
-#include "../cert_chain/ble_auth_all_certs/bleauth_peripheral_cert.h"
-#include "../cert_chain/ble_auth_all_certs/bleauth_peripheral_key.h"
-#include "../cert_chain/ble_auth_all_certs/bleauth_central_key.h"
+#include "../../../certs/auth_certs.h"
 #endif
 
 
@@ -78,31 +77,11 @@ static struct authenticate_conn auth_conn;
 
 #if defined(CONFIG_AUTH_DTLS)
 
-/* The Root and Intermediate Certs, in a single chain, PEM format.*/
-static struct auth_tls_certs ca_cert_chain = {
-    .cert_type = AUTH_CERT_CA_CHAIN,
-    .cert_data = bleauth_root_ca_chain_pem,
-    .cert_len = sizeof(bleauth_root_ca_chain_pem),
-    .private_key = NULL,            /* not used for CA certs */
-    .key_len = 0u
-};
-
-static struct auth_tls_certs periph_device_cert = {
-    .cert_type = AUTH_CERT_END_DEVICE,
-    .cert_data = bleauth_peripheral_cert_pem,
-    .cert_len = sizeof(bleauth_peripheral_cert_pem),
-    .private_key = bleauth_peripheral_key_pem,
-    .key_len = sizeof(bleauth_peripheral_key_pem)
-};
-
-/**
- * @brief Struct containing all of the certs for this Central device.
- */
-static struct auth_cert_container peripheral_certs = {
-        .num_ca_certs = 1,            ///<  1 if passing a chain of CA certs.
-        .ca_certs = &ca_cert_chain,   ///<  Cert chain, contians Root and Intermediate
-        .device_cert = &periph_device_cert   ///<  End device cert.
-};
+/* The Root and Intermediate Certs in a single CA chain.
+ * plus the server cert. All in PEM format.*/
+static const uint8_t auth_cert_ca_chain[] = AUTH_ROOTCA_CERT_PEM AUTH_INTERMEDIATE_CERT_PEM;
+static const uint8_t auth_dev_server_cert[] = AUTH_SERVER_CERT_PEM;
+static const uint8_t auth_server_privatekey[] = AUTH_SERVER_PRIVATE_KEY_PEM;
 #endif
 
 /**
@@ -267,6 +246,8 @@ static void process_log_msgs(void)
 
 void main(void)
 {
+    int err = 0;
+
     log_init();
 
     uint32_t auth_flags = AUTH_CONN_SERVER;
@@ -278,7 +259,25 @@ void main(void)
     /**
     * Add certificates to authentication instance.
     */
-    auth_svc_set_tls_certs(&auth_conn, &peripheral_certs);
+
+    /* Add cert chain and end server cert. */
+    if( (err = tls_credential_add(AUTH_CERT_CA_CHAIN_TAG, TLS_CREDENTIAL_CA_CERTIFICATE,
+		                     auth_cert_ca_chain, sizeof(auth_cert_ca_chain))) != 0 ||
+        (err = tls_credential_add(AUTH_DEVICE_CERT_TAG, TLS_CREDENTIAL_SERVER_CERTIFICATE,
+		                     auth_dev_server_cert, sizeof(auth_dev_server_cert))) != 0)
+    {
+        printk("Failed to add certs, err: %d\n", err);
+        return;
+    }
+
+    /* Add server cert private key. */
+    if((err = tls_credential_add(AUTH_DEVICE_CERT_TAG, TLS_CREDENTIAL_PRIVATE_KEY,
+		                     auth_server_privatekey, sizeof(auth_server_privatekey))) != 0)
+	{
+        printk("Failed to add server private key, err: %d\n", err);
+        return;
+	}
+
 #endif
 
 #if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
@@ -286,7 +285,7 @@ void main(void)
 #endif
 
 
-    int err = auth_lib_init(&auth_conn, auth_status, NULL, auth_flags);
+    err = auth_lib_init(&auth_conn, auth_status, NULL, auth_flags);
 
     if(err){
         printk("Failed to init authentication service.\n");
