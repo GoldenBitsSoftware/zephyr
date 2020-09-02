@@ -583,6 +583,11 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
         memcpy(msg_frag.frag_payload, data, payload_bytes);
         msg_frag.hdr.payload_len = payload_bytes;
 
+// DAG DEBUG BEG
+        LOG_INF("** sending fragment, bytes: %d, frag bits: %d", fragment_bytes,
+                msg_frag.hdr.sync_flags & ~XPORT_FRAG_SYNC_MASK);
+// DAG DEBUG END
+
         /* convert header to Big Endian, network byte order */
         auth_message_hdr_to_be16(&msg_frag.hdr);
 

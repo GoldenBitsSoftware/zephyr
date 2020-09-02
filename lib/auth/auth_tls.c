@@ -347,7 +347,7 @@ static void auth_mbed_debug(void *ctx, int level, const char *file,
 }
 
 
-#pragma pack(push, 1)
+
 #define DTLS_PACKET_SYNC_BYTES      0x45B8
 #define DTLS_HEADER_BYTES           (sizeof(struct dtls_packet_hdr))
 
@@ -356,6 +356,7 @@ static void auth_mbed_debug(void *ctx, int level, const char *file,
  * must be forwarded to Mbedtls as one or more complete packets.  TLS is
  * design to handle an incoming byte stream.
  */
+#pragma pack(push, 1)
 struct dtls_packet_hdr {
     uint16_t sync_bytes;    /* use magic number to identify header */
     uint16_t packet_len;    /* size of DTLS datagram */
@@ -394,9 +395,12 @@ static int auth_mbedtls_tx(void *ctx, const uint8_t *buf, size_t len)
     send_cnt = auth_xport_send(auth_conn->xport_hdl, buf, len);
 #endif
 
-    if(send_cnt < 0){
+    if(send_cnt < 0) {
+        LOG_ERR("Failed to send, err: %d", send_cnt);
         return -1;  /* TODO: Return the correct MBED error code */
     }
+
+    LOG_INF("Send %d byes.", send_cnt);
 
     /* return number bytes sent, do not include the DTLS header */
     return (send_cnt - DTLS_HEADER_BYTES);
@@ -426,10 +430,20 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
     int total_bytes_returned = 0;
     uint16_t packet_len = 0;
 
+    // DAG DEBUG BEG
+    LOG_INF("**auth_mbedtls_rx() start");
+    // DAG DEBUG END
+
     while(true) {
 
-        rx_bytes = auth_xport_getnum_recvqueue_bytes(auth_conn->xport_hdl);
+        rx_bytes = auth_xport_getnum_recvqueue_bytes_wait(auth_conn->xport_hdl, 1000u);
 
+        /* no bytes or timed out */
+        if(rx_bytes == 0 || rx_bytes == -EAGAIN) {
+            continue;
+        }
+
+        /* an error */
         if(rx_bytes < 0) {
             /* an error occurred */
             return rx_bytes;
@@ -485,6 +499,9 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
             total_bytes_returned += rx_bytes;
             len -= rx_bytes;
             buffer += rx_bytes;
+
+           /* we're done with one DTLS packet, return */
+            break;
         }
     }
 
@@ -771,8 +788,7 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
             ret = mbedtls_ssl_handshake_step(&mbed_ctx->ssl);
 
             // DAG DEBUG BEG
-            ret = -ret;
-            LOG_ERR("**Handshake state: %s, ret: 0x%x", auth_tls_handshake_state(mbed_ctx->ssl.state), ret);
+            LOG_ERR("**Handshake state: %s, ret: 0x%x", auth_tls_handshake_state(mbed_ctx->ssl.state), -ret);
             // DAG DEBUG END
 
             if(ret != 0) {
