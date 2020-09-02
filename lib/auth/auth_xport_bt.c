@@ -530,7 +530,7 @@ ssize_t auth_xp_bt_central_write(struct bt_conn *conn, const struct bt_gatt_attr
     auth_message_hdr_to_cpu((struct auth_message_frag_hdr *)buf);
     int err = auth_message_assemble(bt_xp_conn->xporthdl, buf, len);
 #else
-    int err = auth_xport_buffer_put(bt_xp_conn->xporthdl, uf, len);
+    int err = auth_xport_buffer_put(bt_xp_conn->xporthdl, buf, len);
 #endif
 
     /* if no error, need to return num of bytes handled. */
