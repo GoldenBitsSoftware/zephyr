@@ -28,13 +28,10 @@
 #include <logging/log.h>
 #include <logging/log_ctrl.h>
 
+#include <auth/auth_lib.h>
 
-
-#if defined(CONFIG_DTLS_AUTH_METHOD)
-#include "../cert_chain/ble_auth_all_certs/bleauth_ca_chain.h"
-#include "../cert_chain/ble_auth_all_certs/bleauth_central_cert.h"
-#include "../cert_chain/ble_auth_all_certs/bleauth_peripheral_key.h"
-#include "../cert_chain/ble_auth_all_certs/bleauth_central_key.h"
+#if defined(CONFIG_AUTH_DTLS)
+#include "../../../certs/auth_certs.h"
 #endif
 
 
@@ -61,6 +58,15 @@ LOG_MODULE_REGISTER(central_auth, CONFIG_AUTH_LOG_LEVEL);
 #define EDGE    (GPIO_INT_EDGE | GPIO_INT_ACTIVE_LOW)
 #endif
 #define PULL_UP DT_ALIAS_SW0_GPIOS_FLAGS
+
+#if defined(CONFIG_AUTH_DTLS)
+/* The Root and Intermediate Certs in a single CA chain.
+ * plus the server cert. All in PEM format.*/
+static const uint8_t auth_cert_ca_chain[] = AUTH_ROOTCA_CERT_PEM AUTH_INTERMEDIATE_CERT_PEM;
+static const uint8_t auth_dev_client_cert[] = AUTH_CLIENT_CERT_PEM;
+static const uint8_t auth_client_privatekey[] = AUTH_CLIENT_PRIVATE_KEY_PEM;
+#endif
+
 
 
 static struct bt_conn *default_conn;
@@ -111,34 +117,6 @@ static auth_svc_gatt_t auth_svc_gatt_tbl[AUTH_SVC_GATT_COUNT] = {
         { BT_UUID_GATT_CCC,             NULL, 0, 0, BT_GATT_PERM_NONE, BT_GATT_DISCOVER_DESCRIPTOR},     //!< AUTH_SVC_CLIENT_CCC_INDEX CCC for Client char */
         { BT_UUID_AUTH_SVC_SERVER_CHAR, NULL, 0, 0, BT_GATT_PERM_NONE, BT_GATT_DISCOVER_CHARACTERISTIC}   //!< AUTH_SVC_SERVER_CHAR_INDEX
  };
-
-#if defined(CONFIG_DTLS_AUTH_METHOD)
-/* The Root and Intermediate Certs, in a single chain, PEM format.*/
-static struct auth_tls_certs ca_cert_chain = {
-    .cert_type = AUTH_CERT_CA_CHAIN,
-    .cert_data = bleauth_root_ca_chain_pem,
-    .cert_len = sizeof(bleauth_root_ca_chain_pem),
-    .private_key = NULL,            /* not used for CA certs */
-    .key_len = 0u
-};
-
-static struct auth_tls_certs device_cert = {
-    .cert_type = AUTH_CERT_END_DEVICE,
-    .cert_data = bleauth_central_cert_pem,
-    .cert_len = sizeof(bleauth_central_cert_pem),
-    .private_key = bleauth_central_key_pem,
-    .key_len = sizeof(bleauth_central_key_pem)
-};
-
-/**
- * @brief Struct containing all of the certs for this Central device.
- */
-static struct auth_cert_container certs = {
-        .num_ca_certs = 1,            ///<  1 if passing a chain of CA certs.
-        .ca_certs = &ca_cert_chain,   ///<  Cert chain, contians Root and Intermediate
-        .device_cert = &device_cert   ///<  End device cert.
-};
-#endif
 
 
 /**
@@ -560,10 +538,29 @@ void main(void)
 
 
 #if defined(CONFIG_AUTH_DTLS)
+    flags |= AUTH_CONN_DTLS_AUTH_METHOD;
+
     /**
     * Add certificates to authentication instance.
     */
-    auth_svc_set_tls_certs(&central_auth_conn, &certs);
+
+    /* Add cert chain and end server cert. */
+    if( (err = tls_credential_add(AUTH_CERT_CA_CHAIN_TAG, TLS_CREDENTIAL_CA_CERTIFICATE,
+		                     auth_cert_ca_chain, sizeof(auth_cert_ca_chain))) != 0 ||
+        (err = tls_credential_add(AUTH_DEVICE_CERT_TAG, TLS_CREDENTIAL_SERVER_CERTIFICATE,
+		                     auth_dev_client_cert, sizeof(auth_dev_client_cert))) != 0)
+    {
+        printk("Failed to add certs, err: %d\n", err);
+        return;
+    }
+
+    /* Add server cert private key. */
+    if((err = tls_credential_add(AUTH_DEVICE_CERT_TAG, TLS_CREDENTIAL_PRIVATE_KEY,
+		                     auth_client_privatekey, sizeof(auth_client_privatekey))) != 0)
+	{
+        printk("Failed to add server private key, err: %d\n", err);
+        return;
+	}
 #endif
 
     err = auth_lib_init(&central_auth_conn, auth_status, NULL, flags);
