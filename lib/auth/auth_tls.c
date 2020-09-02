@@ -459,6 +459,7 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
 
         /* Zero length packet, ignore */
         if(dtls_hdr.packet_len == 0u) {
+            LOG_ERR("Empty DTLS packet.");
             /* Read the DTLS header and return */
             auth_xport_recv(auth_conn->xport_hdl, (uint8_t*)&dtls_hdr, sizeof(struct dtls_packet_hdr), 1000u);
             return total_bytes_returned;
@@ -736,9 +737,11 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
             return;
         }
 
-        while(true) {
+        int bytecount = 0;
+        while(bytecount == 0) {
+
             /* Server wait for client hello */
-            int bytecount = auth_xport_getnum_recvqueue_bytes_wait(auth_conn->xport_hdl, 15000u);
+            bytecount = auth_xport_getnum_recvqueue_bytes_wait(auth_conn->xport_hdl, 15000u);
 
             if (bytecount < 0) {
                 LOG_ERR("Server, error when waiting for client hello, error: %d", bytecount);
@@ -768,6 +771,7 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
             ret = mbedtls_ssl_handshake_step(&mbed_ctx->ssl);
 
             // DAG DEBUG BEG
+            ret = -ret;
             LOG_ERR("**Handshake state: %s, ret: 0x%x", auth_tls_handshake_state(mbed_ctx->ssl.state), ret);
             // DAG DEBUG END
 

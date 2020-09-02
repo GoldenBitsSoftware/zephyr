@@ -609,6 +609,9 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
         num_fragments++;
     }
 
+// DAG DEBUG BEG
+    LOG_ERR("** Sent %d total bytes.", send_count);
+// DAG DEBUG END
     return send_count;
 
 #endif
@@ -847,6 +850,10 @@ int auth_message_assemble(const auth_xport_hdl_t xporthdl, const uint8_t *buf, s
     if(rx_frag->hdr.sync_flags & XPORT_FRAG_NEXT) {
         LOG_INF("** next frag");
     }
+
+    if(rx_frag->hdr.sync_flags & XPORT_FRAG_END) {
+        LOG_INF("** END frag");
+    }
 // DAG DEBUG END
 
     /* Subtract out fragment header */
@@ -887,7 +894,7 @@ int auth_message_assemble(const auth_xport_hdl_t xporthdl, const uint8_t *buf, s
     if(rx_frag->hdr.sync_flags & XPORT_FRAG_END) {
 
         /* log number payload bytes received. */
-        LOG_DBG("RX-Got LAST fragment, total bytes: %d", msg_recv->rx_curr_offset);
+        LOG_INF("RX-Got LAST fragment, total bytes: %d", msg_recv->rx_curr_offset);
 
         int free_bytes = auth_xport_buffer_avail_bytes(&xp_inst->recv_buf);
 
