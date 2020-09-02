@@ -583,6 +583,11 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
         memcpy(msg_frag.frag_payload, data, payload_bytes);
         msg_frag.hdr.payload_len = payload_bytes;
 
+// DAG DEBUG BEG
+        LOG_INF("** sending fragment, bytes: %d, frag bits: %d", fragment_bytes,
+                msg_frag.hdr.sync_flags & ~XPORT_FRAG_SYNC_MASK);
+// DAG DEBUG END
+
         /* convert header to Big Endian, network byte order */
         auth_message_hdr_to_be16(&msg_frag.hdr);
 
@@ -887,7 +892,7 @@ int auth_message_assemble(const auth_xport_hdl_t xporthdl, const uint8_t *buf, s
     if(rx_frag->hdr.sync_flags & XPORT_FRAG_END) {
 
         /* log number payload bytes received. */
-        LOG_DBG("RX-Got LAST fragment, total bytes: %d", msg_recv->rx_curr_offset);
+        LOG_INF("RX-Got LAST fragment, total bytes: %d", msg_recv->rx_curr_offset);
 
         int free_bytes = auth_xport_buffer_avail_bytes(&xp_inst->recv_buf);
 
