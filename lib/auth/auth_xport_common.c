@@ -843,6 +843,12 @@ int auth_message_assemble(const auth_xport_hdl_t xporthdl, const uint8_t *buf, s
         return AUTH_ERROR_XPORT_FRAME;
     }
 
+// DAG DEBUG BEG
+    if(rx_frag->hdr.sync_flags & XPORT_FRAG_NEXT) {
+        LOG_INF("** next frag");
+    }
+// DAG DEBUG END
+
     /* Subtract out fragment header */
     buflen -= XPORT_FRAG_HDR_BYTECNT;
 

@@ -119,6 +119,100 @@ static void auth_init_context(struct mbed_tls_context *mbed_ctx)
     mbedtls_ctr_drbg_init(&mbed_ctx->ctr_drbg);
 }
 
+/**
+ * Return the handshake state name, helpful for debug purposes.
+ *
+ * @param state  The state enumeration.
+ *
+ * @return  Pointer to handshake string name.
+ */
+static const char *auth_tls_handshake_state(const mbedtls_ssl_states state)
+{
+    switch(state) {
+
+        case MBEDTLS_SSL_HELLO_REQUEST:
+            return "MBEDTLS_SSL_HELLO_REQUEST";
+            break;
+
+        case MBEDTLS_SSL_CLIENT_HELLO:
+            return "MBEDTLS_SSL_CLIENT_HELLO";
+            break;
+
+        case MBEDTLS_SSL_SERVER_HELLO:
+            return "MBEDTLS_SSL_SERVER_HELLO";
+            break;
+
+        case MBEDTLS_SSL_SERVER_CERTIFICATE:
+            return "MBEDTLS_SSL_SERVER_CERTIFICATE";
+            break;
+
+        case MBEDTLS_SSL_SERVER_KEY_EXCHANGE:
+            return "MBEDTLS_SSL_SERVER_KEY_EXCHANGE";
+            break;
+
+        case MBEDTLS_SSL_CERTIFICATE_REQUEST:
+            return "MBEDTLS_SSL_CERTIFICATE_REQUEST";
+            break;
+
+        case MBEDTLS_SSL_SERVER_HELLO_DONE:
+            return "MBEDTLS_SSL_SERVER_HELLO_DONE";
+            break;
+
+        case MBEDTLS_SSL_CLIENT_CERTIFICATE:
+            return "MBEDTLS_SSL_CLIENT_CERTIFICATE";
+            break;
+
+        case MBEDTLS_SSL_CLIENT_KEY_EXCHANGE:
+            return "MBEDTLS_SSL_CLIENT_KEY_EXCHANGE";
+            break;
+
+        case MBEDTLS_SSL_CERTIFICATE_VERIFY:
+            return "MBEDTLS_SSL_CERTIFICATE_VERIFY";
+            break;
+
+        case MBEDTLS_SSL_CLIENT_CHANGE_CIPHER_SPEC:
+            return "MBEDTLS_SSL_CLIENT_CHANGE_CIPHER_SPEC";
+            break;
+
+        case MBEDTLS_SSL_CLIENT_FINISHED:
+            return "MBEDTLS_SSL_CLIENT_FINISHED";
+            break;
+
+        case MBEDTLS_SSL_SERVER_CHANGE_CIPHER_SPEC:
+            return "MBEDTLS_SSL_SERVER_CHANGE_CIPHER_SPEC";
+            break;
+
+        case MBEDTLS_SSL_SERVER_FINISHED:
+            return "MBEDTLS_SSL_SERVER_FINISHED";
+            break;
+
+        case MBEDTLS_SSL_FLUSH_BUFFERS:
+            return "MBEDTLS_SSL_FLUSH_BUFFERS";
+            break;
+
+        case MBEDTLS_SSL_HANDSHAKE_WRAPUP:
+            return "MBEDTLS_SSL_HANDSHAKE_WRAPUP";
+            break;
+
+        case MBEDTLS_SSL_HANDSHAKE_OVER:
+            return "MBEDTLS_SSL_HANDSHAKE_OVER";
+            break;
+
+        case MBEDTLS_SSL_SERVER_NEW_SESSION_TICKET:
+            return "MBEDTLS_SSL_SERVER_NEW_SESSION_TICKET";
+            break;
+
+        case MBEDTLS_SSL_SERVER_HELLO_VERIFY_REQUEST_SENT:
+            return "MBEDTLS_SSL_SERVER_HELLO_VERIFY_REQUEST_SENT";
+            break;
+
+        default:
+            break;
+    }
+
+    return "unknown";
+}
+
 
 /**
  * Timer functions
@@ -359,12 +453,19 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
         dtls_hdr.packet_len = sys_be16_to_cpu(dtls_hdr.packet_len);
 
         /* Is there enough room to copy into Mbedtls buffer? */
-        if(dtls_hdr.packet_len > len) {
+        if(dtls_hdr.packet_len > len)  {
+            return total_bytes_returned;
+        }
+
+        /* Zero length packet, ignore */
+        if(dtls_hdr.packet_len == 0u) {
+            /* Read the DTLS header and return */
+            auth_xport_recv(auth_conn->xport_hdl, (uint8_t*)&dtls_hdr, sizeof(struct dtls_packet_hdr), 1000u);
             return total_bytes_returned;
         }
 
         /* rx_bytes must be at least DTLS_HEADER_BYTES in length  here */
-        if((int)dtls_hdr.packet_len < (rx_bytes - (int)DTLS_HEADER_BYTES)) {
+        if((int)dtls_hdr.packet_len <= (rx_bytes - (int)DTLS_HEADER_BYTES)) {
 
             packet_len = dtls_hdr.packet_len;
 
@@ -566,7 +667,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
     mbedtls_ssl_conf_dbg(&mbed_ctx->conf, auth_mbed_debug, auth_conn);
 
 #if defined(MBEDTLS_DEBUG_C)
-    mbedtls_debug_set_threshold(0); // Should be KConfig option
+    mbedtls_debug_set_threshold(3); // Should be KConfig option
 #endif
 
     if (!auth_conn->is_client) {
@@ -615,18 +716,17 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
 
 
     /**
-     * For the peripheral (server) we can start the handshake, the code will continue to
+     * For the server we can noty start the handshake, the code will continue to
      * read looking for a "Client Hello".  So we'll just stay at the  MBEDTLS_SSL_CLIENT_HELLO
      * state until the central sends the "Client Hello"
      *
-     * For the central (client), a client hello will be sent immediately.
+     * For the client, a client hello will be sent immediately.
      */
 
     if (!auth_conn->is_client) {
 
         /**
-         * For the peripheral (acting as a the DTLS server), use the connection handle
-         * as the
+         * For the the DTLS server, use the auth connection handle as the cookie.
          */
         int ret = auth_tls_set_cookie(auth_conn);
 
@@ -636,38 +736,39 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
             return;
         }
 
-        int bytecount = auth_xport_getnum_recvqueue_bytes_wait(auth_conn->xport_hdl, 15000u);
+        while(true) {
+            /* Server wait for client hello */
+            int bytecount = auth_xport_getnum_recvqueue_bytes_wait(auth_conn->xport_hdl, 15000u);
 
-
-        if(bytecount <= 0) {
-            LOG_ERR("Peripheral did not receive initial Client Hello, auth failed, error: %d", bytecount);
-            auth_lib_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
-            return;
+            if (bytecount < 0) {
+                LOG_ERR("Server, error when waiting for client hello, error: %d", bytecount);
+                auth_lib_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
+                return;
+            }
         }
 
-        LOG_DBG("Peripheral received initial Client Hello from central.");
+        LOG_INF("Server received initial Client Hello from client.");
     }
 
     // DAG DEBUG BEG
     int prev_state = 0xFF;
     // DAG DEBUG END
 
-
     int ret = 0;
-    // start
+    /* start handshake */
     do {
 
         while(mbed_ctx->ssl.state != MBEDTLS_SSL_HANDSHAKE_OVER)
         {
             // DAG DEBUG BEG
-            LOG_ERR("** STARTING Handshake state: %d", mbed_ctx->ssl.state);
+            LOG_ERR("** STARTING Handshake state: %s", auth_tls_handshake_state(mbed_ctx->ssl.state));
             // DAG DEBUG END
 
             // do handshake step
             ret = mbedtls_ssl_handshake_step(&mbed_ctx->ssl);
 
             // DAG DEBUG BEG
-            LOG_ERR("**Handshake state: %d, ret: 0x%x", mbed_ctx->ssl.state, ret);
+            LOG_ERR("**Handshake state: %s, ret: 0x%x", auth_tls_handshake_state(mbed_ctx->ssl.state), ret);
             // DAG DEBUG END
 
             if(ret != 0) {
@@ -678,7 +779,7 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
         // DAG DEBUG BEG
         if(prev_state != mbed_ctx->ssl.state) {
             // print handshake state
-            LOG_ERR("Handshake state: %d", mbed_ctx->ssl.state);
+            LOG_ERR("Handshake state: %s", auth_tls_handshake_state(mbed_ctx->ssl.state));
             prev_state = mbed_ctx->ssl.state;
         }
         // DAG DEBUG END
@@ -690,7 +791,7 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
         if(ret == MBEDTLS_ERR_SSL_HELLO_VERIFY_REQUIRED) {
 
             /* restart handshake to process client cookie */
-            LOG_DBG("Restarting handshake, need client cookie.");
+            LOG_INF("Restarting handshake, need client cookie.");
 
             mbedtls_ssl_session_reset(&mbed_ctx->ssl);
 
