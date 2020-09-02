@@ -89,12 +89,11 @@
 
 
 #define AUTH_CLIENT_PRIVATE_KEY_PEM \
-"-----BEGIN EC PRIVATE KEY-----\r\n"    \
-"MHcCAQEEIJ87D6q+Z4ulXG2B9lQblbgCQh4xhMgImQpyKxUCtP3soAoGCCqGSM49\r\n"    \
-"AwEHoUQDQgAEkwj+WKKVM3k9AEiS/efDhXoICq/e8rVKew2qpun6zie8xATw7pyt\r\n"    \
-"e1Hf59Ga2Vmti/QTvzczZrvj/m0LbKzmnw==\r\n"    \
-"-----END EC PRIVATE KEY-----\r\n"
-
+    "-----BEGIN EC PRIVATE KEY-----\r\n"    \
+    "MHcCAQEEIJ87D6q+Z4ulXG2B9lQblbgCQh4xhMgImQpyKxUCtP3soAoGCCqGSM49\r\n"    \
+    "AwEHoUQDQgAEkwj+WKKVM3k9AEiS/efDhXoICq/e8rVKew2qpun6zie8xATw7pyt\r\n"    \
+    "e1Hf59Ga2Vmti/QTvzczZrvj/m0LbKzmnw==\r\n"    \
+    "-----END EC PRIVATE KEY-----\r\n"
 
 #endif  // ZEPHYR_INCLUDE_AUTH_CERTS_H_
 
