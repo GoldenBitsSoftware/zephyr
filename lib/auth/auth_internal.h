@@ -40,7 +40,7 @@ struct auth_ringbuf {
 /**
  * Defines to handle message fragmentation over the different transports.
  */
-#define XPORT_MAX_MESSAGE_SIZE          256u  /* should be at least as large as the MTU */
+#define XPORT_MAX_MESSAGE_SIZE          650u  /* should be at large as the largest msg. */
                                               // TODO:  Make this a CONFIG_ param
 /**
  * A message is broken up into multiple fragments.  Each fragement has
