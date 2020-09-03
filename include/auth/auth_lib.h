@@ -113,6 +113,9 @@ struct authenticate_conn
     /* authentication thread for this connection */
     k_thread_entry_t auth_thread_func;
 
+    /* cancel the authentication  */
+    volatile bool cancel_auth;
+
     /* Pointer to internal details, do not touch!!! */
     void *internal_obj;
 

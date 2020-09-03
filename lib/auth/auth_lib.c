@@ -112,10 +112,11 @@ int auth_lib_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_f
     /* init the struct to zero */
     memset(auth_conn, 0, sizeof(struct authenticate_conn));
 
-
-    // setup the status callback
+    /* setup the status callback */
     auth_conn->status_cb = status_func;
     auth_conn->callback_context = context;
+
+    auth_conn->cancel_auth = false;
 
     /* init the work item used to post authentication status */
     k_work_init(&auth_conn->auth_status_work, auth_lib_status_work);
@@ -174,7 +175,17 @@ int auth_lib_start(struct authenticate_conn *auth_conn)
     return AUTH_SUCCESS;
 }
 
+/**
+ * @see auth_lib.h
+ */
+int auth_lib_cancel(struct authenticate_conn *auth_conn)
+{
+    auth_conn->cancel_auth = true;
 
+    auth_lib_set_status(auth_conn, AUTH_STATUS_CANCEL_PENDING);
+
+    return AUTH_SUCCESS;
+}
 
 /**
  * @see auth_lib.h

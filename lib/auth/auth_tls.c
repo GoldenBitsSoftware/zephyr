@@ -733,6 +733,9 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
     struct mbed_tls_context *mbed_ctx = (struct mbed_tls_context *) auth_conn->internal_obj;
 
 
+    /* Set status */
+    auth_lib_set_status(auth_conn, AUTH_STATUS_STARTED);
+
     /**
      * For the server we can noty start the handshake, the code will continue to
      * read looking for a "Client Hello".  So we'll just stay at the  MBEDTLS_SSL_CLIENT_HELLO
@@ -750,7 +753,7 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
 
         if(ret) {
             LOG_ERR("Failed to get connection info for DTLS cookie, auth failed, error: 0x%x", ret);
-            auth_lib_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
+            auth_lib_set_status(auth_conn, AUTH_STATUS_FAILED);
             return;
         }
 
@@ -762,7 +765,7 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
 
             if (bytecount < 0) {
                 LOG_ERR("Server, error when waiting for client hello, error: %d", bytecount);
-                auth_lib_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
+                auth_lib_set_status(auth_conn, AUTH_STATUS_FAILED);
                 return;
             }
         }
@@ -774,11 +777,15 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
     int prev_state = 0xFF;
     // DAG DEBUG END
 
+    /* Set status */
+    auth_lib_set_status(auth_conn, AUTH_STATUS_IN_PROCESS);
+
     int ret = 0;
     /* start handshake */
     do {
 
-        while(mbed_ctx->ssl.state != MBEDTLS_SSL_HANDSHAKE_OVER)
+        while(mbed_ctx->ssl.state != MBEDTLS_SSL_HANDSHAKE_OVER &&
+              !auth_conn->cancel_auth)
         {
             // DAG DEBUG BEG
             LOG_ERR("** STARTING Handshake state: %s", auth_tls_handshake_state(mbed_ctx->ssl.state));
@@ -805,8 +812,10 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
         // DAG DEBUG END
 
 
-        // check return and post status
-        //auth_internal_status_callback(struct authenticate_conn *auth_con , auth_status_t status)
+        if(auth_conn->cancel_auth) {
+            LOG_INF("Authentication canceled.");
+            break;
+        }
 
         if(ret == MBEDTLS_ERR_SSL_HELLO_VERIFY_REQUIRED) {
 
@@ -826,30 +835,46 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
             }
         }
 
-        // Check if we should cancel
-        // if(auth_conn->cancel)
-        // {
-        //    set status to cancel
-        //    break;
-        // }
+        if(auth_conn->cancel_auth) {
+            LOG_INF("Authentication canceled.");
+            break;
+        }
 
     } while( ret == MBEDTLS_ERR_SSL_WANT_READ ||
              ret == MBEDTLS_ERR_SSL_WANT_WRITE );
 
-    if(ret == 0) {
-        LOG_DBG("DTLS Handshake success.");
+
+    if(mbed_ctx->ssl.state == MBEDTLS_SSL_HANDSHAKE_OVER) {
+        LOG_INF("DTLS Handshake success.");
     } else {
-        LOG_ERR("DTLS Handshake failed, error: 0x%x", ret);
+        LOG_ERR("DTLS Handshake failed, error: 0x%x", -ret);
     }
 
 
-    // final status
-    //      AUTH_CANCELED,
-    //     AUTH_FAILED,
-    //     AUTH_SUCCESSFUL
-    //auth_internal_status_callback(struct authenticate_conn *auth_con , auth_status_t status)
+    enum auth_status auth_status;
 
-    //            auth_svc_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
+    switch(ret) {
+        case MBEDTLS_ERR_SSL_BAD_HS_CERTIFICATE:
+        case MBEDTLS_ERR_SSL_BAD_HS_CERTIFICATE_VERIFY:
+            auth_status = AUTH_STATUS_AUTHENTICATION_FAILED;
+            break;
+
+        case MBEDTLS_SSL_HANDSHAKE_OVER:
+            auth_status = AUTH_STATUS_SUCCESSFUL;
+            break;
+
+        default:
+            auth_status = AUTH_STATUS_FAILED;
+            break;
+    }
+
+    /* now check if cancel occurred */
+    if(auth_conn->cancel_auth) {
+        auth_status = AUTH_STATUS_CANCELED;
+    }
+
+    /* Call status */
+    auth_lib_set_status(auth_conn, auth_status);
 
     return;
 }
