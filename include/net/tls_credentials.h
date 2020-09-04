@@ -119,7 +119,7 @@ int tls_credential_get(sec_tag_t tag, enum tls_credential_type type,
  * @retval -ENOENT Requested TLS credential was not found.
  */
 int tls_credential_get_info(sec_tag_t tag, enum tls_credential_type type,
-                            uint8_t **cred_val, size_t *cred_len);
+                            void **cred_val, size_t *cred_len);
 
 /**
  * @brief Delete a TLS credential.

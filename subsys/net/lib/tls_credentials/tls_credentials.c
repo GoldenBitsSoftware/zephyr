@@ -145,7 +145,7 @@ exit:
 
 
 int tls_credential_get_info(sec_tag_t tag, enum tls_credential_type type,
-                            uint8_t **cred_val, size_t *cred_len)
+                            void **cred_val, size_t *cred_len)
 {
     struct tls_credential *credential;
     int ret = 0;
