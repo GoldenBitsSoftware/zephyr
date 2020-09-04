@@ -788,15 +788,11 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
               !auth_conn->cancel_auth)
         {
             // DAG DEBUG BEG
-            LOG_ERR("** STARTING Handshake state: %s", auth_tls_handshake_state(mbed_ctx->ssl.state));
+            LOG_INF("** STARTING Handshake state: %s", auth_tls_handshake_state(mbed_ctx->ssl.state));
             // DAG DEBUG END
 
             // do handshake step
             ret = mbedtls_ssl_handshake_step(&mbed_ctx->ssl);
-
-            // DAG DEBUG BEG
-            LOG_ERR("**Handshake state: %s, ret: 0x%x", auth_tls_handshake_state(mbed_ctx->ssl.state), -ret);
-            // DAG DEBUG END
 
             if(ret != 0) {
                 break;
@@ -806,7 +802,7 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
         // DAG DEBUG BEG
         if(prev_state != mbed_ctx->ssl.state) {
             // print handshake state
-            LOG_ERR("Handshake state: %s", auth_tls_handshake_state(mbed_ctx->ssl.state));
+            LOG_INF("Handshake new state: %s", auth_tls_handshake_state(mbed_ctx->ssl.state));
             prev_state = mbed_ctx->ssl.state;
         }
         // DAG DEBUG END
@@ -846,6 +842,7 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
 
     if(mbed_ctx->ssl.state == MBEDTLS_SSL_HANDSHAKE_OVER) {
         LOG_INF("DTLS Handshake success.");
+        ret = AUTH_SUCCESS;
     } else {
         LOG_ERR("DTLS Handshake failed, error: 0x%x", -ret);
     }
@@ -859,7 +856,7 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
             auth_status = AUTH_STATUS_AUTHENTICATION_FAILED;
             break;
 
-        case MBEDTLS_SSL_HANDSHAKE_OVER:
+        case AUTH_SUCCESS:
             auth_status = AUTH_STATUS_SUCCESSFUL;
             break;
 
