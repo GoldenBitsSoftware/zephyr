@@ -49,6 +49,23 @@ LOG_MODULE_DECLARE(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 #define USE_DTLS  1  /* TODO: Make this a KConfig var */
 
 
+#ifdef USE_DTLS
+#define DTLS_PACKET_SYNC_BYTES      0x45B8
+#define DTLS_HEADER_BYTES           (sizeof(struct dtls_packet_hdr))
+
+/**
+ * Header identifying a DTLS packet (aka datagram).  Unlike TLS, DTLS packets
+ * must be forwarded to Mbedtls as one or more complete packets.  TLS is
+ * design to handle an incoming byte stream.
+ */
+#pragma pack(push, 1)
+struct dtls_packet_hdr {
+    uint16_t sync_bytes;    /* use magic number to identify header */
+    uint16_t packet_len;    /* size of DTLS datagram */
+};
+#pragma pack(pop)
+#endif
+
 
 /**
  * Keep list of internal structs which
@@ -77,7 +94,6 @@ static struct mbed_tls_context tlscontext[MAX_MBEDTLS_CONTEXT];
 
 
 /* ===================== local functions =========================== */
-
 
 /* return NULL if unable to get context */
 static struct mbed_tls_context *auth_get_mbedcontext(void)
@@ -348,21 +364,6 @@ static void auth_mbed_debug(void *ctx, int level, const char *file,
 
 
 
-#define DTLS_PACKET_SYNC_BYTES      0x45B8
-#define DTLS_HEADER_BYTES           (sizeof(struct dtls_packet_hdr))
-
-/**
- * Header identifying a DTLS packet (aka datagram).  Unlike TLS, DTLS packets
- * must be forwarded to Mbedtls as one or more complete packets.  TLS is
- * design to handle an incoming byte stream.
- */
-#pragma pack(push, 1)
-struct dtls_packet_hdr {
-    uint16_t sync_bytes;    /* use magic number to identify header */
-    uint16_t packet_len;    /* size of DTLS datagram */
-};
-#pragma pack(pop)
-
 /**
  * Mbed routine to send data, called by Mbed TLS library.
  *
@@ -491,7 +492,7 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
         auth_xport_recv_peek(auth_conn->xport_hdl, (uint8_t*)&dtls_hdr, sizeof(struct dtls_packet_hdr));
 
         /* check for sync bytes */
-        if( sys_be16_to_cpu(dtls_hdr.sync_bytes) != DTLS_PACKET_SYNC_BYTES) {
+        if(sys_be16_to_cpu(dtls_hdr.sync_bytes) != DTLS_PACKET_SYNC_BYTES) {
             // read bytes and try to peek again
             auth_xport_recv(auth_conn->xport_hdl, (uint8_t*)&dtls_hdr, sizeof(struct dtls_packet_hdr), 1000u);
             continue;

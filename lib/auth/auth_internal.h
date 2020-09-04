@@ -85,18 +85,6 @@ struct auth_message_fragment {
 #pragma pack(pop)
 
 
-/**
- * Contains buffer used to assemble a message from multiple fragments.
- */
-struct auth_message_recv
-{
-    /* pointer to buffer where message is assembled */
-    uint8_t rx_buffer[XPORT_MAX_MESSAGE_SIZE];
-
-    /* vars used for re-assembling frames into a message */
-    uint32_t rx_curr_offset;
-    bool rx_first_frag;
-};
 #endif
 
 
@@ -248,8 +236,6 @@ int auth_sever_rx(struct authenticate_conn *conn, uint8_t *buf, size_t len);
 
 #ifdef CONFIG_AUTH_FRAGMENT
 
-/* funcs to handle message fragmentation */
-void auth_message_frag_init(struct auth_message_recv *recv_msg);
 
 /**
  * Scans buffer to determine if a fragment is present.

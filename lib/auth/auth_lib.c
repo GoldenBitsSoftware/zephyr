@@ -23,8 +23,8 @@ LOG_MODULE_REGISTER(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 #include "auth_internal.h"
 
 
-#define HANDSHAKE_THRD_STACK_SIZE       4096
-#define HANDSHAKE_THRD_PRIORITY         0
+#define AUTH_THRD_STACK_SIZE       4096u
+#define AUTH_THRD_PRIORITY         0
 
 
 /**
@@ -32,7 +32,7 @@ LOG_MODULE_REGISTER(auth_lib, CONFIG_AUTH_LOG_LEVEL);
  * and use them among multiple connections?  Maybe track how many active handshake
  * threads have been started and if hit max then return wait?
  */
-K_THREAD_STACK_DEFINE(auth_thread_stack_area_1, HANDSHAKE_THRD_STACK_SIZE);
+K_THREAD_STACK_DEFINE(auth_thread_stack_area_1, AUTH_THRD_STACK_SIZE);
 
 /* TODO: Move these to auth_svc.h and wrap in #define */
 void auth_dtls_thead(void *arg1, void *arg2, void *arg3);
@@ -79,7 +79,7 @@ int auth_lib_start_thread(struct authenticate_conn *auth_conn)
     // TODO:  Get thread stack from stack pool?
     auth_conn->auth_tid = k_thread_create(&auth_conn->auth_thrd_data, auth_thread_stack_area_1,
                                           K_THREAD_STACK_SIZEOF(auth_thread_stack_area_1),
-                                          auth_conn->auth_thread_func, auth_conn, NULL, NULL, HANDSHAKE_THRD_PRIORITY,
+                                          auth_conn->auth_thread_func, auth_conn, NULL, NULL, AUTH_THRD_PRIORITY,
                                           0,  // options
                                           K_NO_WAIT);
 
