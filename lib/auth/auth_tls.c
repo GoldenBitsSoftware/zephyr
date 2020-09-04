@@ -773,14 +773,11 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
         LOG_INF("Server received initial Client Hello from client.");
     }
 
-    // DAG DEBUG BEG
-    int prev_state = 0xFF;
-    // DAG DEBUG END
-
     /* Set status */
     auth_lib_set_status(auth_conn, AUTH_STATUS_IN_PROCESS);
 
     int ret = 0;
+
     /* start handshake */
     do {
 
@@ -798,14 +795,6 @@ void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
                 break;
             }
         }
-
-        // DAG DEBUG BEG
-        if(prev_state != mbed_ctx->ssl.state) {
-            // print handshake state
-            LOG_INF("Handshake new state: %s", auth_tls_handshake_state(mbed_ctx->ssl.state));
-            prev_state = mbed_ctx->ssl.state;
-        }
-        // DAG DEBUG END
 
 
         if(auth_conn->cancel_auth) {
