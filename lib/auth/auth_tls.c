@@ -43,10 +43,10 @@ LOG_MODULE_DECLARE(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 #include "auth_internal.h"
 
 
-#define MAX_MBEDTLS_CONTEXT     5
+#define MAX_MBEDTLS_CONTEXT     2
 
 
-#define USE_DTLS        1  /* TODO: Make this a KConfig var */
+#define USE_DTLS  1  /* TODO: Make this a KConfig var */
 
 
 
@@ -66,17 +66,20 @@ struct mbed_tls_context {
     mbedtls_pk_context device_private_key;
     mbedtls_timing_delay_context timer;
     mbedtls_ssl_cookie_ctx cookie_ctx;
+
+#ifdef USE_DTLS
+    /* Temp buffer used to assemble full frame when sending. */
+    uint8_t temp_dtlsbuf[CONFIG_MBEDTLS_SSL_MAX_CONTENT_LEN];
+#endif
 };
 
 static struct mbed_tls_context tlscontext[MAX_MBEDTLS_CONTEXT];
 
 
-
-
 /* ===================== local functions =========================== */
 
 
-// return NULL if unable to get context
+/* return NULL if unable to get context */
 static struct mbed_tls_context *auth_get_mbedcontext(void)
 {
     // use mutex lock to protect accessing list
@@ -374,18 +377,43 @@ static int auth_mbedtls_tx(void *ctx, const uint8_t *buf, size_t len)
     int send_cnt;
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
 
+    if(auth_conn == NULL) {
+        return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+    }
+
 #ifdef USE_DTLS
-    uint8_t dtls_temp_buf[600];  /* make 600 config var */
-    struct dtls_packet_hdr *dtls_hdr = (struct dtls_packet_hdr *)dtls_temp_buf;
+    struct dtls_packet_hdr *dtls_hdr;
+    struct mbed_tls_context *mbedctx = (struct mbed_tls_context *)auth_conn->internal_obj;
+
+    if(mbedctx == NULL) {
+        LOG_ERR("Missing Mbed context.");
+        return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+    }
+
+    dtls_hdr = (struct dtls_packet_hdr *)mbedctx->temp_dtlsbuf;
+
+    /**
+     * DTLS is targeted for the UDP datagram protocol, as such the Mbed stack
+     * expects a full DTLS packet (ie datagram) to be receive vs. a partial
+     * packet. When sending, add a header to enable the receiving side
+     * to determine when a full DTLS packet has been recevid.
+     */
+
+    /* Check the temp buffer is large enough */
+    if( (sizeof(mbedctx->temp_dtlsbuf) - DTLS_HEADER_BYTES) < len) {
+        return MBEDTLS_ERR_SSL_BUFFER_TOO_SMALL;
+    }
 
     /* set byte order to Big Endian when sending over lower transport. */
     dtls_hdr->sync_bytes = sys_cpu_to_be16(DTLS_PACKET_SYNC_BYTES);
     dtls_hdr->packet_len = sys_cpu_to_be16((uint16_t)len);  /* does not include header */
 
-    memcpy(&dtls_temp_buf[DTLS_HEADER_BYTES], buf, len);
+    /* Combine the header with the payload.  This maximizes the lower transport
+     * throughput vs. sending the DTLS header separately then sending the body. */
+    memcpy(&mbedctx->temp_dtlsbuf[DTLS_HEADER_BYTES], buf, len);
 
     /* send to peripheral */
-    send_cnt = auth_xport_send(auth_conn->xport_hdl, dtls_temp_buf, len + DTLS_HEADER_BYTES);
+    send_cnt = auth_xport_send(auth_conn->xport_hdl, mbedctx->temp_dtlsbuf, len + DTLS_HEADER_BYTES);
 #else
     /* TLS - just send, no need to worry about DTLS IP packet boundary.
      * TLS can handle a steam of bytes. */
@@ -424,16 +452,25 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
 #else
 
     struct dtls_packet_hdr dtls_hdr;
-    int total_bytes_returned = 0;
     uint16_t packet_len = 0;
 
-    // DAG DEBUG BEG
-    LOG_INF("**auth_mbedtls_rx() start");
-    // DAG DEBUG END
+    /**
+     * DTLS is targeted for the UDP datagram protocol, as such the Mbed stack
+     * expects a full DTLS packet (ie datagram) to be receive vs. a partial
+     * packet.  For the lower transports, a full datagram packet maybe broken
+     * up into multiple fragments.  The receive queue may contain a partial
+     * DTLS frame.  The code here waits until a full DTLS packet is received.
+     */
 
+     /* Will wait until a full DTLS packet is received. */
     while(true) {
 
         rx_bytes = auth_xport_getnum_recvqueue_bytes_wait(auth_conn->xport_hdl, 1000u);
+
+        /* Check for canceld flag */
+        if(auth_conn->cancel_auth) {
+            return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+        }
 
         /* no bytes or timed out */
         if(rx_bytes == 0 || rx_bytes == -EAGAIN) {
@@ -443,11 +480,11 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
         /* an error */
         if(rx_bytes < 0) {
             /* an error occurred */
-            return rx_bytes;
+            return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
         }
 
         if(rx_bytes < DTLS_HEADER_BYTES) {
-            return total_bytes_returned;
+            continue;
         }
 
         /* peek into receive queue */
@@ -465,7 +502,7 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
 
         /* Is there enough room to copy into Mbedtls buffer? */
         if(dtls_hdr.packet_len > len)  {
-            return total_bytes_returned;
+            return MBEDTLS_ERR_SSL_BUFFER_TOO_SMALL;
         }
 
         /* Zero length packet, ignore */
@@ -473,10 +510,11 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
             LOG_ERR("Empty DTLS packet.");
             /* Read the DTLS header and return */
             auth_xport_recv(auth_conn->xport_hdl, (uint8_t*)&dtls_hdr, sizeof(struct dtls_packet_hdr), 1000u);
-            return total_bytes_returned;
+            return 0;
         }
 
-        /* rx_bytes must be at least DTLS_HEADER_BYTES in length  here */
+        /* rx_bytes must be at least DTLS_HEADER_BYTES in length here.  Enough
+         * to fill a complete DTLS packet. */
         if((int)dtls_hdr.packet_len <= (rx_bytes - (int)DTLS_HEADER_BYTES)) {
 
             packet_len = dtls_hdr.packet_len;
@@ -490,19 +528,25 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
 
             if(rx_bytes <= 0) {
                 /* an error occurred */
-                return total_bytes_returned;
+                return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
             }
 
-            total_bytes_returned += rx_bytes;
             len -= rx_bytes;
             buffer += rx_bytes;
 
            /* we're done with one DTLS packet, return */
-            break;
+           return rx_bytes;
         }
+
+        /**
+         * If we're here it means we have a partial DTLS packet,
+         * wait for more data until there is enough to fill a
+         * complete DTLS packet.
+         */
+         LOG_DBG("Waiting for more bytes to fill DTLS packet.");
     }
 
-    return total_bytes_returned;
+    return 0;
 #endif
 }
 
