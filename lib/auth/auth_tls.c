@@ -280,17 +280,14 @@ static int auth_tls_drbg_random(void *ctx, unsigned char *rand_buf, size_t numbe
 
 
 /**
- * Mbed debug levels:   0 No debug
-                        1 Error
-                        2 State change
-                        3 Informational
-                        4 Verbose
-
- * @param ctx
- * @param level
- * @param file
- * @param line
- * @param str
+ * Function called by Mbed stack to print debug messages.
+ *
+ *
+ * @param ctx     Context
+ * @param level   Debug level
+ * @param file    Source filename of debug log entry.
+ * @param line    Line number of debug log entry.
+ * @param str     Debug/Log message.
  */
 static void auth_mbed_debug(void *ctx, int level, const char *file,
                             int line, const char *str)
@@ -299,7 +296,7 @@ static void auth_mbed_debug(void *ctx, int level, const char *file,
 
     /**
      * @brief   Need to define const string here vs. const char *fmt = "[%s:%d] %s"
-     *          because the LOG_ERR(), LOG_* macros can't handle pointer.
+     *          because the LOG_ERR(), LOG_* macros can't handle a pointer.
      */
 #define LOG_FMT  "[%s:%d] %s"
 
@@ -685,7 +682,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
     mbedtls_ssl_conf_dbg(&mbed_ctx->conf, auth_mbed_debug, auth_conn);
 
 #if defined(MBEDTLS_DEBUG_C)
-    mbedtls_debug_set_threshold(3); // Should be KConfig option
+    mbedtls_debug_set_threshold(CONFIG_MBEDTLS_DEBUG_LEVEL);
 #endif
 
     if (!auth_conn->is_client) {
