@@ -604,7 +604,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
 {
     struct mbed_tls_context *mbed_ctx;
     int ret;
-    uint8_t *cred_val;
+    void *cred_val;
     size_t cred_len;
 
     LOG_DBG("Initializing Mbed");
