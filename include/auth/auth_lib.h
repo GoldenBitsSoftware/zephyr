@@ -18,7 +18,6 @@ extern "C" {
 //#define CONFIG_DTLS_AUTH_METHOD
 //#define CONFIG_CHALLENGE_RESP_AUTH_METHOD
 //#define CONFIG_USE_L2CAP
-//#define CONFIG_LOOPBACK_TEST    1
 
 /**
  * Should be large enough to hold one TLS record

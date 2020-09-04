@@ -36,7 +36,6 @@ K_THREAD_STACK_DEFINE(auth_thread_stack_area_1, AUTH_THRD_STACK_SIZE);
 
 /* TODO: Move these to auth_svc.h and wrap in #define */
 void auth_dtls_thead(void *arg1, void *arg2, void *arg3);
-void auth_looback_thread(void *arg1, void *arg2, void *arg3);
 void auth_chalresp_thread(void *arg1, void *arg2, void *arg3);
 
 
@@ -137,10 +136,6 @@ int auth_lib_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_f
 
 #ifdef CONFIG_AUTH_CHALLENGE_RESPONSE
     auth_conn->auth_thread_func = auth_chalresp_thread;
-#endif
-
-#ifdef CONFIG_LOOPBACK_TEST
-    auth_conn->auth_thread_func = auth_looback_thread;
 #endif
 
     return AUTH_SUCCESS;
