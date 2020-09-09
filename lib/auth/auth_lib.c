@@ -29,11 +29,11 @@ LOG_MODULE_REGISTER(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 
 
 #if defined(AUTH_INSTANCE_1)
-K_SEM_DEFINE(thrd_sem_1, 1, 1);
+K_SEM_DEFINE(thrd_sem_1, 0, 1);
 #endif
 
 #if defined(AUTH_INSTANCE_2)
-K_SEM_DEFINE(thrd_sem_2, 1, 1);
+K_SEM_DEFINE(thrd_sem_2, 0, 1);
 #endif
 
 static void auth_thrd_entry(void *, void *, void *);
@@ -104,12 +104,12 @@ static void auth_lib_status_work(struct k_work *work)
 
 /* ========================= Internal  API ============================ */
 
-int auth_lib_start_thread(struct authenticate_conn *auth_conn)
+static int auth_lib_start_thread(struct authenticate_conn *auth_conn)
 {
-
     /* signal semaphore to start */
+    int ret = k_sem_give(thrd_params[auth_conn->instance].thrd_sem);
 
-    return AUTH_SUCCESS;
+    return ret;
 }
 
 
@@ -121,7 +121,7 @@ int auth_lib_start_thread(struct authenticate_conn *auth_conn)
  * @param arg2
  * @param arg3
  */
-void auth_thrd_entry(void *arg1, void *arg2, void *arg3)
+static void auth_thrd_entry(void *arg1, void *arg2, void *arg3)
 {
     int ret;
     struct auth_thread_params *thrd_params = (struct auth_thread_params *)arg1;
@@ -139,7 +139,6 @@ void auth_thrd_entry(void *arg1, void *arg2, void *arg3)
         /* call auth thread */
         thrd_params->auth_conn->auth_func(thrd_params->auth_conn);
     }
-
 }
 
 
