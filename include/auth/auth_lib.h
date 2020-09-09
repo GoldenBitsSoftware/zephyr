@@ -12,7 +12,7 @@
 extern "C" {
 #endif
 
-    
+
 /**
  *  Determine number of auth instances, each instance performs
  *  authentication over a given hardware transport such as Bluetooth
@@ -53,10 +53,6 @@ enum auth_instance_id {
 
 #include <auth/auth_xport.h>
 
-/* TODO: Add to Kconfig for BLE authentication service */
-//#define CONFIG_DTLS_AUTH_METHOD
-//#define CONFIG_CHALLENGE_RESP_AUTH_METHOD
-//#define CONFIG_USE_L2CAP
 
 /**
  * Should be large enough to hold one TLS record
@@ -83,10 +79,6 @@ enum auth_instance_id {
 #define AUTH_CONN_CLIENT                    0x0002
 #define AUTH_CONN_DTLS_AUTH_METHOD          0x0004
 #define AUTH_CONN_CHALLENGE_AUTH_METHOD     0x0008
-
-
-
-
 
 
 /**
