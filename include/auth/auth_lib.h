@@ -12,12 +12,7 @@
 extern "C" {
 #endif
 
-
-// DAG DEBUG BEG
-    // Put into KConfig system
-#define CONFIG_NUM_AUTH_INSTANCES       2
-// DAG DEBUG END
-
+    
 /**
  *  Determine number of auth instances, each instance performs
  *  authentication over a given hardware transport such as Bluetooth

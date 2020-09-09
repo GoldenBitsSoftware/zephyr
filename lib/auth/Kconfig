@@ -58,5 +58,19 @@ if AUTH_LIB
 		help
 		If using serial port to authenticate peer.
 
+
+	config NUM_AUTH_INSTANCES
+	    int "Number of authentication instances"
+	    range 1 2
+	    default 1
+	    help
+	    Each authentication instance uses a thread to authenticate with
+	    a peer over the lower transport.  It is possible to have multiple
+	    authentication instances where one instance authenticates a peer
+	    over Bluetooth and another authenticates over a serial link.  Another example
+	    would be a Bluetooth Central needing to authenticate multiple
+	    connected Peripherals.
+
+
 endif
 
