@@ -23,21 +23,49 @@ LOG_MODULE_REGISTER(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 #include "auth_internal.h"
 
 
-#define HANDSHAKE_THRD_STACK_SIZE       4096
-#define HANDSHAKE_THRD_PRIORITY         0
+#define AUTH_THRD_STACK_SIZE       (4096u)
+#define AUTH_THRD_PRIORITY         (0u)
 
 
-/**
- * Have to come up with a way to re-use stack.  Maybe statically alloc two stacks
- * and use them among multiple connections?  Maybe track how many active handshake
- * threads have been started and if hit max then return wait?
- */
-K_THREAD_STACK_DEFINE(auth_thread_stack_area_1, HANDSHAKE_THRD_STACK_SIZE);
 
-/* TODO: Move these to auth_svc.h and wrap in #define */
-void auth_dtls_thead(void *arg1, void *arg2, void *arg3);
-void auth_looback_thread(void *arg1, void *arg2, void *arg3);
-void auth_chalresp_thread(void *arg1, void *arg2, void *arg3);
+#if defined(AUTH_INSTANCE_1)
+K_SEM_DEFINE(thrd_sem_1, 1, 1);
+#endif
+
+#if defined(AUTH_INSTANCE_2)
+K_SEM_DEFINE(thrd_sem_2, 1, 1);
+#endif
+
+static void auth_thrd_entry(void *, void *, void *);
+
+static struct auth_thread_params thrd_params[CONFIG_NUM_AUTH_INSTANCES] =
+{
+#if defined(AUTH_INSTANCE_1)
+    {.thrd_sem = &thrd_sem_1},
+#endif
+
+#if defined(AUTH_INSTANCE_2)
+    {.thrd_sem = &thrd_sem_2},
+#endif
+};
+
+#if defined(AUTH_INSTANCE_1)
+K_THREAD_DEFINE(auth_tid_1, AUTH_THRD_STACK_SIZE,
+                auth_thrd_entry, &thrd_params[AUTH_INST_1_ID], NULL, NULL,
+                AUTH_THRD_PRIORITY, 0, 0);
+#endif
+
+
+#if defined(AUTH_INSTANCE_2)
+K_THREAD_DEFINE(auth_tid_2, AUTH_THRD_STACK_SIZE,
+                auth_thrd_entry, &thrd_params[AUTH_INST_2_ID], NULL, NULL,
+                AUTH_THRD_PRIORITY, 0, 0);
+#endif
+
+
+
+void auth_dtls_thead(struct authenticate_conn *auth_conn);
+void auth_chalresp_thread(struct authenticate_conn *auth_conn);
 
 
 
@@ -68,7 +96,8 @@ static void auth_lib_status_work(struct k_work *work)
     }
 
     /* invoke callback */
-    auth_conn->status_cb(auth_conn, auth_conn->curr_status, auth_conn->callback_context);
+    auth_conn->status_cb(auth_conn, auth_conn->instance, auth_conn->curr_status,
+                         auth_conn->callback_context);
 }
 
 
@@ -76,14 +105,40 @@ static void auth_lib_status_work(struct k_work *work)
 
 int auth_lib_start_thread(struct authenticate_conn *auth_conn)
 {
-    // TODO:  Get thread stack from stack pool?
-    auth_conn->auth_tid = k_thread_create(&auth_conn->auth_thrd_data, auth_thread_stack_area_1,
-                                          K_THREAD_STACK_SIZEOF(auth_thread_stack_area_1),
-                                          auth_conn->auth_thread_func, auth_conn, NULL, NULL, HANDSHAKE_THRD_PRIORITY,
-                                          0,  // options
-                                          K_NO_WAIT);
+    /* signal semaphore to start */
+
 
     return AUTH_SUCCESS;
+}
+
+
+
+/**
+ * Auth thread starts during boot and waits on semaphore.
+ *
+ * @param arg1
+ * @param arg2
+ * @param arg3
+ */
+void auth_thrd_entry(void *arg1, void *arg2, void *arg3)
+{
+    int ret;
+    struct auth_thread_params *thrd_params = (struct auth_thread_params *)arg1;
+
+    while(true) {
+
+        ret = k_sem_take(thrd_params->thrd_sem, K_FOREVER);
+
+        if(ret) {
+            LOG_ERR("Failed to get semaphore for auth thread, err: %d", ret);
+            LOG_ERR("Auth thread terminating, instance id: %d.", thrd_params->auth_conn->instance);
+            return;
+        }
+
+        /* call auth thread */
+        thrd_params->auth_conn->auth_func(thrd_params->auth_conn);
+    }
+
 }
 
 
@@ -95,7 +150,7 @@ int auth_lib_start_thread(struct authenticate_conn *auth_conn)
  * @see auth_lib.h
  */
 int auth_lib_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_func,
-                  void *context, uint32_t auth_flags)
+                  enum auth_instance_id instance, void *context, uint32_t auth_flags)
 {
     /* check input params */
     if(status_func == NULL) {
@@ -117,14 +172,15 @@ int auth_lib_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_f
     auth_conn->callback_context = context;
 
     auth_conn->cancel_auth = false;
+    auth_conn->instance = instance;
 
     /* init the work item used to post authentication status */
     k_work_init(&auth_conn->auth_status_work, auth_lib_status_work);
 
     auth_conn->is_client = (auth_flags & AUTH_CONN_CLIENT) ? true : false;
 
-#ifdef CONFIG_AUTH_DTLS
-    auth_conn->auth_thread_func = auth_dtls_thead;
+#if defined(CONFIG_AUTH_DTLS)
+    auth_conn->auth_func = auth_dtls_thead;
 
     // init TLS layer
     int err = auth_init_dtls_method(auth_conn);
@@ -135,12 +191,8 @@ int auth_lib_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_f
     }
 #endif
 
-#ifdef CONFIG_AUTH_CHALLENGE_RESPONSE
-    auth_conn->auth_thread_func = auth_chalresp_thread;
-#endif
-
-#ifdef CONFIG_LOOPBACK_TEST
-    auth_conn->auth_thread_func = auth_looback_thread;
+#if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
+    auth_conn->auth_func = auth_chalresp_thread;
 #endif
 
     return AUTH_SUCCESS;

@@ -82,11 +82,11 @@ typedef int(*send_xport_t)(auth_xport_hdl_t xport_hdl, const uint8_t *data, cons
  * Initializes the lower transport layer.
  *
  * @param xporthdl
- * @param flags
+ * @param instance
  *
  * @return
  */
-int auth_xport_init(auth_xport_hdl_t *xporthdl,  uint32_t flags, void *xport_params);
+int auth_xport_init(auth_xport_hdl_t *xporthdl,  enum auth_instance_id instance, void *xport_params);
 
 /**
  * De-initializes the transport.  The lower layer transport should

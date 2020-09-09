@@ -768,9 +768,8 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
  * @param arg2
  * @param arg3
  */
-void auth_dtls_thead(void *arg1, void *arg2, void *arg3) {
+void auth_dtls_thead(struct authenticate_conn *auth_conn) {
 
-    struct authenticate_conn *auth_conn = (struct authenticate_conn *) arg1;
     struct mbed_tls_context *mbed_ctx = (struct mbed_tls_context *) auth_conn->internal_obj;
 
 

@@ -381,11 +381,10 @@ static bool auth_server_recv_chalresp(struct authenticate_conn *auth_conn, uint8
 /**
  * @brief  Use hash (SHA-256) with shared key to authenticate each side.
  */
-void auth_chalresp_thread(void *arg1, void *arg2, void *arg3)
+void auth_chalresp_thread(struct authenticate_conn *auth_conn)
 {
     enum auth_status status;
     uint8_t random_chal[AUTH_CHALLENGE_LEN];
-    struct authenticate_conn *auth_conn = (struct authenticate_conn *)arg1;
 
     auth_lib_set_status(auth_conn, AUTH_STATUS_STARTED);
 

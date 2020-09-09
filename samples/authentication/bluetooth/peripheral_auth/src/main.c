@@ -113,7 +113,7 @@ static void connected(struct bt_conn *conn, u8_t err)
         struct auth_xp_bt_params xport_param = { .conn = conn, .is_central = false,
                                                  .client_attr = &auth_svc.attrs[1] };
 
-        ret = auth_xport_init(&auth_conn.xport_hdl, 0, &xport_param);
+        ret = auth_xport_init(&auth_conn.xport_hdl, auth_conn.instance, &xport_param);
 
         if(ret) {
             printk("Failed to initialize BT transport, err: %d", ret);
@@ -213,7 +213,8 @@ static void bt_ready(int err)
 }
 
 
-static void auth_status(struct authenticate_conn *auth_conn, enum auth_status status, void *context)
+static void auth_status(struct authenticate_conn *auth_conn, enum auth_instance_id instance,
+                        enum auth_status status, void *context)
 {
     /* print out auth status */
     printk("Authentication status: %s\n", auth_lib_getstatus_str(status));
@@ -285,7 +286,7 @@ void main(void)
 #endif
 
 
-    err = auth_lib_init(&auth_conn, auth_status, NULL, auth_flags);
+    err = auth_lib_init(&auth_conn, auth_status, AUTH_INST_1_ID, NULL, auth_flags);
 
     if(err){
         printk("Failed to init authentication service.\n");

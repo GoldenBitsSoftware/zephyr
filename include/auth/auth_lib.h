@@ -12,13 +12,56 @@
 extern "C" {
 #endif
 
+
+// DAG DEBUG BEG
+    // Put into KConfig system
+#define CONFIG_NUM_AUTH_INSTANCES       2
+// DAG DEBUG END
+
+/**
+ *  Determine number of auth instances, each instance performs
+ *  authentication over a given hardware transport such as Bluetooth
+ *  or serial.  It is possible to configure the authentication
+ *  library to authenticate over BLE and Serial.  Or if the device
+ *  is a Bluetooth central, then two instances can be used to authenticate
+ *  two different peripherals.
+ */
+#if (CONFIG_NUM_AUTH_INSTANCES == 0)
+#error Error at least one Authentication instance must be defined.
+#endif
+
+#if (CONFIG_NUM_AUTH_INSTANCES > 0)
+#define AUTH_INSTANCE_1
+#endif
+
+#if (CONFIG_NUM_AUTH_INSTANCES > 1)
+#define AUTH_INSTANCE_2
+#endif
+
+
+/**
+ * Auth instance id enuma=s
+ */
+enum auth_instance_id {
+
+#if defined(AUTH_INSTANCE_1)
+    AUTH_INST_1_ID = 0,
+#endif
+
+#if defined(AUTH_INSTANCE_2)
+    AUTH_INST_2_ID = 1,
+#endif
+
+    AUTH_MAX_INSTANCES
+};
+
+
 #include <auth/auth_xport.h>
 
 /* TODO: Add to Kconfig for BLE authentication service */
 //#define CONFIG_DTLS_AUTH_METHOD
 //#define CONFIG_CHALLENGE_RESP_AUTH_METHOD
 //#define CONFIG_USE_L2CAP
-//#define CONFIG_LOOPBACK_TEST    1
 
 /**
  * Should be large enough to hold one TLS record
@@ -50,6 +93,8 @@ extern "C" {
 
 
 
+
+
 /**
  *  Authentication status enums
  */
@@ -75,15 +120,21 @@ enum auth_status {
  /* Forward declaration */
 struct authenticate_conn;
 
+/**
+ * Authentication function prototype
+ */
+typedef void (*auth_instance_func_t)(volatile struct authenticate_conn *);
+
  /**
   * Authentication callback status function
   */
-typedef void (*auth_status_cb_t)(struct authenticate_conn *auth_conn, enum auth_status status, void *context);
+typedef void (*auth_status_cb_t)(struct authenticate_conn *auth_conn, enum auth_instance_id instance,
+                                 enum auth_status status, void *context);
 
 
 /**
- * @brief  Used to manage one authentication session with peer.  It is possible
- *         to have multiple concurrent authentication sessions. For example if
+ * @brief  Used to manage one authentication instance with a peer.  It is possible
+ *         to have multiple concurrent authentication instances. For example if
  *         a device is acting as a Central and Peripheral concurrently.
  */
 struct authenticate_conn
@@ -98,6 +149,9 @@ struct authenticate_conn
     /* current status of the authentication process */
     enum auth_status curr_status;
 
+    /* The auth instance ID for this connection */
+    enum auth_instance_id instance;
+
     /* status callback func */
     auth_status_cb_t status_cb;
     void *callback_context;
@@ -106,19 +160,15 @@ struct authenticate_conn
      * status changes/fails in an ISR context */
     struct k_work auth_status_work;
 
-    /* thread vars */
-    k_tid_t auth_tid;
-    struct k_thread auth_thrd_data;
 
-    /* authentication thread for this connection */
-    k_thread_entry_t auth_thread_func;
+    /* authentication function, performs the actual authentication */
+    auth_instance_func_t auth_func;
 
     /* cancel the authentication  */
     volatile bool cancel_auth;
 
     /* Pointer to internal details, do not touch!!! */
     void *internal_obj;
-
 };
 
 
@@ -126,15 +176,16 @@ struct authenticate_conn
 /**
  *  Initializes authentication library
  *
- * @param auth_conn     Authentication connection struct, initialized by this call.
+ * @param auth_conn    Authentication connection struct, initialized by this call.
  * @param status_func  Status function callback.
+ * @param instance     The instance ID.
  * @param context      Optional context used in status callback.
  * @param auth_flags   Authentication flags.
  *
  * @return 0 on success else one of AUTH_ERROR_* values.
  */
-int auth_lib_init(struct authenticate_conn *auth_conn,
-                  auth_status_cb_t status_func, void *context, uint32_t auth_flags);
+int auth_lib_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_func,
+                  enum auth_instance_id instance, void *context, uint32_t auth_flags);
 
 /**
  * Frees up any previously allocated resources.

@@ -61,7 +61,7 @@ struct auth_xport_instance
 };
 
 // allocate instances??
-static struct auth_xport_instance xport_inst[1];
+static struct auth_xport_instance xport_inst[CONFIG_NUM_AUTH_INSTANCES];
 
 
 /* ================ local static funcs ================== */
@@ -437,19 +437,23 @@ static int auth_xport_internal_send(const auth_xport_hdl_t xporthdl, const uint8
 /**
  * @see auth_xport.h
  */
-int auth_xport_init(auth_xport_hdl_t *xporthdl, uint32_t flags, void* xport_params)
+int auth_xport_init(auth_xport_hdl_t *xporthdl, enum auth_instance_id instance, void* xport_params)
 {
     int ret = 0;
 
-    // TODO: Need to handle multiple instances of xport
-    *xporthdl = &xport_inst[0];
+    /* verify instance */
+    if((instance < 0) || (instance >= AUTH_MAX_INSTANCES)) {
+        return AUTH_ERROR_INVALID_PARAM;
+    }
+
+    *xporthdl = &xport_inst[instance];
 
     /* init IO buffers */
-    auth_xport_iobuffer_init(&xport_inst[0].send_buf);
-    auth_xport_iobuffer_init(&xport_inst[0].recv_buf);
+    auth_xport_iobuffer_init(&xport_inst[instance].send_buf);
+    auth_xport_iobuffer_init(&xport_inst[instance].recv_buf);
 
 #ifdef CONFIG_AUTH_FRAGMENT
-    auth_message_frag_init(&xport_inst[0].recv_msg);
+    auth_message_frag_init(&xport_inst[instance].recv_msg);
 #endif
 
 

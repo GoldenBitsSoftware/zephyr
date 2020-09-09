@@ -7,6 +7,15 @@
 #ifndef ZEPHYR_INCLUDE_AUTH_INTERNAL_H_
 #define ZEPHYR_INCLUDE_AUTH_INTERNAL_H_
 
+
+
+
+struct auth_thread_params {
+    volatile struct authenticate_conn *auth_conn;
+    struct k_sem *thrd_sem;
+};
+
+
 /**
  * @brief  Timeout in Msec when waiting for GATT read/write to complete.
  */
