@@ -69,6 +69,7 @@ void auth_chalresp_thread(struct authenticate_conn *auth_conn);
 
 
 
+
 /* ========================== local functions ========================= */
 
 static bool auth_lib_checkflags(uint32_t flags)
@@ -105,8 +106,8 @@ static void auth_lib_status_work(struct k_work *work)
 
 int auth_lib_start_thread(struct authenticate_conn *auth_conn)
 {
-    /* signal semaphore to start */
 
+    /* signal semaphore to start */
 
     return AUTH_SUCCESS;
 }
@@ -190,6 +191,7 @@ int auth_lib_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_f
         return err;
     }
 #endif
+
 
 #if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
     auth_conn->auth_func = auth_chalresp_thread;

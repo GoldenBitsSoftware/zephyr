@@ -66,7 +66,6 @@ enum auth_instance_id {
 /**
  * Should be large enough to hold one TLS record
  */
-#define CENTRAL_RX_BUFFER_LEN               500
 
 #define AUTH_SUCCESS                        0
 #define AUTH_ERROR_BASE                     (-200)

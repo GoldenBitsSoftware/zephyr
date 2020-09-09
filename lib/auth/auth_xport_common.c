@@ -39,7 +39,18 @@ struct auth_xport_io_buffer {
 };
 
 
+/**
+ * Contains buffer used to assemble a message from multiple fragments.
+ */
+struct auth_message_recv
+{
+    /* pointer to buffer where message is assembled */
+    uint8_t rx_buffer[XPORT_MAX_MESSAGE_SIZE];
 
+    /* vars used for re-assembling frames into a message */
+    uint32_t rx_curr_offset;
+    bool rx_first_frag;
+};
 
 // ---------------- API ---------------------
 struct auth_xport_instance
@@ -431,6 +442,19 @@ static int auth_xport_internal_send(const auth_xport_hdl_t xporthdl, const uint8
     return auth_xport_buffer_put(&xp_inst->send_buf, data, len);
 }
 
+#ifdef CONFIG_AUTH_FRAGMENT
+/**
+ * Initializes message receive struct.  Used to re-assemble message
+ * fragments recevied.
+ *
+ * @param recv_msg Received message buffer.
+ */
+static void auth_message_frag_init(struct auth_message_recv *recv_msg)
+{
+    recv_msg->rx_curr_offset = 0;
+    recv_msg->rx_first_frag = true;
+}
+#endif
 
 /* ==================== Non static funcs ================== */
 
@@ -623,6 +647,8 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
 }
 
 
+
+
 /**
  * @see auth_xport.h
  *
@@ -787,13 +813,6 @@ bool auth_message_get_fragment(const uint8_t *buffer, uint16_t buflen, uint16_t 
 }
 
 
-
-/* funcs to handle message fragmentation */
-void auth_message_frag_init(struct auth_message_recv *recv_msg)
-{
-    recv_msg->rx_curr_offset = 0;
-    recv_msg->rx_first_frag = true;
-}
 
 /**
  * @see auth_internal.h
