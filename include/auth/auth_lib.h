@@ -69,7 +69,9 @@ enum auth_instance_id {
 #define AUTH_ERROR_INTERNAL                 (AUTH_ERROR_BASE - 7)
 #define AUTH_ERROR_XPORT_SEND               (AUTH_ERROR_BASE - 8)
 #define AUTH_ERROR_XPORT_FRAME              (AUTH_ERROR_BASE - 9)
-#define AUTH_CRYPTO_ERROR                   (AUTH_ERROR_BASE - 10)
+#define AUTH_ERROR_CRYPTO                   (AUTH_ERROR_BASE - 10)
+#define AUTH_ERROR_FAILED                   (AUTH_ERROR_BASE - 11)
+#define AUTH_ERROR_CANCELED                 (AUTH_ERROR_BASE - 12)
 
 
 /**
@@ -109,7 +111,7 @@ struct authenticate_conn;
 /**
  * Authentication function prototype
  */
-typedef void (*auth_instance_func_t)(volatile struct authenticate_conn *);
+typedef void (*auth_instance_func_t)(struct authenticate_conn *);
 
  /**
   * Authentication callback status function

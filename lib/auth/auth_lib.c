@@ -68,8 +68,6 @@ void auth_dtls_thead(struct authenticate_conn *auth_conn);
 void auth_chalresp_thread(struct authenticate_conn *auth_conn);
 
 
-
-
 /* ========================== local functions ========================= */
 
 static bool auth_lib_checkflags(uint32_t flags)
@@ -103,15 +101,6 @@ static void auth_lib_status_work(struct k_work *work)
 
 
 /* ========================= Internal  API ============================ */
-
-static int auth_lib_start_thread(struct authenticate_conn *auth_conn)
-{
-    /* signal semaphore to start */
-    int ret = k_sem_give(thrd_params[auth_conn->instance].thrd_sem);
-
-    return ret;
-}
-
 
 
 /**
@@ -191,10 +180,12 @@ int auth_lib_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_f
     }
 #endif
 
-
 #if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
     auth_conn->auth_func = auth_chalresp_thread;
 #endif
+
+    /* set auth connect into thread param instance */
+    thrd_params[instance].auth_conn = auth_conn;
 
     return AUTH_SUCCESS;
 }
@@ -214,16 +205,8 @@ int auth_lib_deinit(struct authenticate_conn *auth_conn)
  */
 int auth_lib_start(struct authenticate_conn *auth_conn)
 {
-    int err;
-
     /* Start the authentication thread */
-    err = auth_lib_start_thread(auth_conn);
-
-    if(err) {
-        LOG_ERR("Failed to start authentication thread, err: %d", err);
-
-        auth_lib_set_status(auth_conn, AUTH_STATUS_FAILED);
-    }
+    k_sem_give(thrd_params[auth_conn->instance].thrd_sem);
 
     return AUTH_SUCCESS;
 }

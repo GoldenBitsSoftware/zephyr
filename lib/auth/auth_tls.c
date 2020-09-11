@@ -769,10 +769,9 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
  * @param arg2
  * @param arg3
  */
-void auth_dtls_thead(struct authenticate_conn *auth_conn) {
-
+void auth_dtls_thead(struct authenticate_conn *auth_conn)
+{
     struct mbed_tls_context *mbed_ctx = (struct mbed_tls_context *) auth_conn->internal_obj;
-
 
     /* Set status */
     auth_lib_set_status(auth_conn, AUTH_STATUS_STARTED);

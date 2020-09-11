@@ -48,24 +48,44 @@ LOG_MODULE_DECLARE(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 /* ensure structs are byte aligned */
 #pragma pack(push, 1)
 
+/**
+ * Header for challenge reponse messages
+ */
 struct chalresp_header {
     uint16_t soh;          /* start of header */
     uint8_t msg_id;
 };
 
+/**
+ * Sent by the client, contains a random challenge which the
+ * server will hash with the know pre-shared key.
+ */
 struct client_challenge  {
     struct chalresp_header hdr;
     uint8_t client_challenge[AUTH_CHALLENGE_LEN];
 };
 
+/**
+ * Server response to the client challenge.  The server responds with
+ * the hash of the client challenge and a server random challenge.
+ */
 struct server_chal_response {
     struct chalresp_header hdr;
+
+    /* Server created hash of the client challenge and
+     * the shared key */
     uint8_t server_response[AUTH_CHAL_RESPONSE_LEN];
+
+    /* To be hashed with the shared key by the client */
     uint8_t server_challenge[AUTH_CHALLENGE_LEN];
 };
 
+/**
+ * Response from client to server challenge.
+ */
 struct client_chal_resp {
     struct chalresp_header hdr;
+    /* hash of server challenge with shared key */
     uint8_t client_response[AUTH_CHAL_RESPONSE_LEN];
 };
 
@@ -89,7 +109,13 @@ static uint8_t shared_key[AUTH_SHARED_KEY_LEN] = {
 
 
 /**
- * Utility function to create the has of the random challenge and the shared key.
+ * Utility function to create the hash of the random challenge and the shared key.
+ * Uses Tiny Crypt hashing code.
+ *
+ * @param random_chal  Pointer to 32 byte value to hash with shared key.
+ * @param hash         Buffer where hash is returned.
+ *
+ * @return AUTH_SUCCESS on success, else error value.
  */
 static int auth_chalresp_hash(const uint8_t *random_chal, uint8_t *hash)
 {
@@ -98,20 +124,27 @@ static int auth_chalresp_hash(const uint8_t *random_chal, uint8_t *hash)
 
     tc_sha256_init(&hash_state);
 
-
     /* Update the hash with the random challenge followed by the shared key. */
     if((err = tc_sha256_update(&hash_state, random_chal, AUTH_CHALLENGE_LEN)) != TC_CRYPTO_SUCCESS ||
        (err = tc_sha256_update(&hash_state, shared_key, AUTH_SHARED_KEY_LEN)) != TC_CRYPTO_SUCCESS) {
-        return AUTH_CRYPTO_ERROR;
+        return AUTH_ERROR_CRYPTO;
     }
 
     /* calc the final hash */
     err = tc_sha256_final(hash, &hash_state) == TC_CRYPTO_SUCCESS ?
-                      AUTH_SUCCESS : AUTH_CRYPTO_ERROR;
+                      AUTH_SUCCESS : AUTH_ERROR_CRYPTO;
 
     return err;
 }
 
+/**
+ * Checks header and id.
+ *
+ * @param hdr      Message header.
+ * @param msg_id   Message ID to check for.
+ *
+ * @return true if message is valid, else false.
+ */
 static bool auth_check_msg(struct chalresp_header *hdr, const uint8_t msg_id)
 {
     if((hdr->soh != CHALLENGE_RESP_SOH) || (hdr->msg_id != msg_id)) {
@@ -121,8 +154,15 @@ static bool auth_check_msg(struct chalresp_header *hdr, const uint8_t msg_id)
     return true;
 }
 
-#if defined(CONFIG_AUTH_CLIENT)
 
+/**
+ * Sends a challenge to the server.
+ *
+ * @param auth_conn     Authentication connection structure.
+ * @param random_chal   Random 32 byte challenge to send.
+ *
+ * @return true if message send successfully, else false on error.
+ */
 static bool auth_client_send_challenge(struct authenticate_conn *auth_conn, const uint8_t *random_chal)
 {
     int numbytes;
@@ -140,13 +180,22 @@ static bool auth_client_send_challenge(struct authenticate_conn *auth_conn, cons
 
     if((numbytes <= 0) || (numbytes != sizeof(chal))) {
         /* error */
-        LOG_ERR("Error sending challenge to peripherl, err: %d", numbytes);
+        LOG_ERR("Error sending challenge to server, err: %d", numbytes);
         return false;
     }
 
     return true;
 }
 
+/**
+ * Recevies and processes the challenge response from the server.
+ *
+ * @param auth_conn     Authentication connection structure.
+ * @param random_chal   32 byte challenge sent to the server.
+ * @param status        Pointer to return authentication status.
+ *
+ * @return true on success, else false.
+ */
 static bool auth_client_recv_chal_resp(struct authenticate_conn *auth_conn, const uint8_t *random_chal,
                                        enum auth_status *status)
 {
@@ -164,7 +213,7 @@ static bool auth_client_recv_chal_resp(struct authenticate_conn *auth_conn, cons
         numbytes = auth_xport_recv(auth_conn->xport_hdl, buf, len, 3000);
 
         if(numbytes <= 0) {
-            LOG_ERR("Failed to read client challenge response, err: %d", numbytes);
+            LOG_ERR("Failed to read server challenge response, err: %d", numbytes);
             *status = AUTH_STATUS_FAILED;
             return false;
         }
@@ -175,14 +224,14 @@ static bool auth_client_recv_chal_resp(struct authenticate_conn *auth_conn, cons
 
     /* check message */
     if(!auth_check_msg(&server_resp.hdr, AUTH_SERVER_CHALRESP_MSG_ID)) {
-        LOG_ERR("Invalid message recieved from the server.");
+        LOG_ERR("Invalid message received from the server.");
         *status = AUTH_STATUS_FAILED;
         return false;
     }
 
 
-    /* now verify response, is the response correct?  Hash the random challenge
-     * with the shared key */
+    /* Now verify response, is the response correct?  Hash the random challenge
+     * with the shared key. */
     err = auth_chalresp_hash(random_chal, hash);
 
     if(err) {
@@ -193,7 +242,7 @@ static bool auth_client_recv_chal_resp(struct authenticate_conn *auth_conn, cons
 
     /* Does the response match what is expected? */
     if(memcmp(hash, server_resp.server_response, sizeof(hash))) {
-        /* authententication failed */
+        /* authentication failed */
         LOG_ERR("Server authentication failed.");
         *status = AUTH_STATUS_AUTHENTICATION_FAILED;
 
@@ -217,7 +266,7 @@ static bool auth_client_recv_chal_resp(struct authenticate_conn *auth_conn, cons
     client_resp.hdr.soh = CHALLENGE_RESP_SOH;
     client_resp.hdr.msg_id = AUTH_CLIENT_CHALRESP_MSG_ID;
 
-    /* Create response to the server's random challeng */
+    /* Create response to the server's random challenge */
      err = auth_chalresp_hash(server_resp.server_challenge, client_resp.client_response);
 
      if(err) {
@@ -240,8 +289,15 @@ static bool auth_client_recv_chal_resp(struct authenticate_conn *auth_conn, cons
     return true;
 }
 
-#else
-
+/**
+ * Server waits and receives a message from the client.
+ *
+ * @param auth_conn   Authentication connection structure.
+ * @param msgbuf      Buffer to copy message into.
+ * @param msglen      Buffer byte lenght.
+ *
+ * @return true if number of bytes were received, else false.
+ */
 static bool auth_server_recv_msg(struct authenticate_conn *auth_conn, uint8_t *msgbuf, size_t msglen)
 {
     int numbytes;
@@ -263,14 +319,23 @@ static bool auth_server_recv_msg(struct authenticate_conn *auth_conn, uint8_t *m
     return true;
 }
 
-static bool auth_server_recv_challenge(struct authenticate_conn *auth_conn, uint8_t *random_chal)
+/**
+ * Handles the client challenge, creates a hash of the challenge with the
+ * shared key.
+ *
+ * @param auth_conn           Authentication connection structure.
+ * @param server_random_chal  The server random challenge to be sent to the client.
+ *
+ * @return  true on success, else false on error.
+ */
+static bool auth_server_recv_challenge(struct authenticate_conn *auth_conn, uint8_t *server_random_chal)
 {
     struct client_challenge chal;
     struct server_chal_response server_resp;
     int numbytes;
 
     if(!auth_server_recv_msg(auth_conn, (uint8_t*)&chal, sizeof(chal))) {
-        LOG_ERR("Failed to recieve challenge message from Client.");
+        LOG_ERR("Failed to receive client challenge message.");
         return false;
     }
 
@@ -283,8 +348,9 @@ static bool auth_server_recv_challenge(struct authenticate_conn *auth_conn, uint
     server_resp.hdr.soh = CHALLENGE_RESP_SOH;
     server_resp.hdr.msg_id = AUTH_SERVER_CHALRESP_MSG_ID;
 
-    /* copy the Server's challenge for the Central */
-    memcpy(server_resp.server_challenge, random_chal, sizeof(server_resp.server_challenge));
+    /* copy the server's challenge for the client */
+    memcpy(server_resp.server_challenge, server_random_chal,
+           sizeof(server_resp.server_challenge));
 
     /* Now create the response for the Client */
     auth_chalresp_hash(chal.client_challenge, server_resp.server_response);
@@ -300,8 +366,17 @@ static bool auth_server_recv_challenge(struct authenticate_conn *auth_conn, uint
     return true;
 }
 
-
-static bool auth_server_recv_chalresp(struct authenticate_conn *auth_conn, uint8_t *random_chal, enum auth_status *status)
+/**
+ *  Handles the client response to the server challenge.
+ *
+ * @param auth_conn            Authentication connection structure.
+ * @param server_random_chal   The server random challenge sent to the client.
+ * @param status               Status of the Challenge-Response authentication set here.
+ *
+ * @return  true on success, else false.
+ */
+static bool auth_server_recv_chalresp(struct authenticate_conn *auth_conn, uint8_t *server_random_chal,
+                                      enum auth_status *status)
 {
     struct client_chal_resp client_resp;
     struct auth_chalresp_result result_resp;
@@ -342,7 +417,7 @@ static bool auth_server_recv_chalresp(struct authenticate_conn *auth_conn, uint8
         return false;
     }
 
-    err = auth_chalresp_hash(random_chal, hash);
+    err = auth_chalresp_hash(server_random_chal, hash);
     if(err) {
         LOG_ERR("Failed to create hash.");
         *status = AUTH_STATUS_FAILED;
@@ -374,8 +449,118 @@ static bool auth_server_recv_chalresp(struct authenticate_conn *auth_conn, uint8
     return true;
 }
 
+/**
+ *  Client function used to execute Challenge-Response authentication.
+ *
+ * @param auth_conn  Authentication connection structure.
+ *
+ * @return  AUTH_SUCCESS on success, else AUTH error code.
+ */
+static int auth_chalresp_client(struct authenticate_conn *auth_conn)
+{
+    int numbytes;
+    uint8_t random_chal[AUTH_CHALLENGE_LEN];
+    struct auth_chalresp_result server_result;
+    enum auth_status status;
 
-#endif /* CONFIG_AUTH_CLIENT */
+    /* generate random number as challenge */
+    sys_rand_get(random_chal, sizeof(random_chal));
+
+    if (!auth_client_send_challenge(auth_conn, random_chal)) {
+        auth_lib_set_status(auth_conn, AUTH_STATUS_FAILED);
+        return AUTH_ERROR_FAILED;
+    }
+
+    /* check for cancel operation */
+    if(auth_conn->cancel_auth) {
+        auth_lib_set_status(auth_conn, AUTH_STATUS_CANCELED);
+        return AUTH_ERROR_CANCELED;
+    }
+
+    /* read response from the sever */
+    if (!auth_client_recv_chal_resp(auth_conn, random_chal, &status)) {
+        auth_lib_set_status(auth_conn, status);
+        return AUTH_ERROR_FAILED;
+    }
+
+    /* Wait for the final response from the Server indicating success or failure
+     * of the Client's response. */
+    numbytes = auth_xport_recv(auth_conn->xport_hdl, (uint8_t * ) & server_result,
+                               sizeof(server_result), AUTH_RX_TIMEOUT_MSEC);
+
+    /* check for cancel operation */
+    if(auth_conn->cancel_auth) {
+        auth_lib_set_status(auth_conn, AUTH_STATUS_CANCELED);
+        return AUTH_ERROR_CANCELED;
+    }
+
+    if ((numbytes <= 0) || (numbytes != sizeof(server_result))) {
+        LOG_ERR("Failed to receive server authentication result.");
+        auth_lib_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
+        return AUTH_ERROR_FAILED;
+    }
+
+    /* check message */
+    if (!auth_check_msg(&server_result.hdr, AUTH_CHALRESP_RESULT_MSG_ID)) {
+        LOG_ERR("Server rejected Client response, authentication failed.");
+        auth_lib_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
+        return AUTH_ERROR_FAILED;
+    }
+
+    /* check the Server result */
+    if (server_result.result != 0) {
+        LOG_ERR("Authentication with server failed.");
+        auth_lib_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
+        return AUTH_ERROR_FAILED;
+    }
+
+    LOG_INF("Authentication with server successful.");
+    auth_lib_set_status(auth_conn, AUTH_STATUS_SUCCESSFUL);
+
+    return AUTH_SUCCESS;
+}
+
+/**
+ *  Server function used to execute Challenge-Response authentication.
+ *
+ * @param auth_conn  Authentication connection structure.
+ *
+ * @return  AUTH_SUCCESS on success, else AUTH error code.
+ */
+static int auth_chalresp_server(struct authenticate_conn *auth_conn)
+{
+    enum auth_status status;
+    uint8_t random_chal[AUTH_CHALLENGE_LEN];
+
+    /* generate random number as challenge */
+    sys_rand_get(random_chal, sizeof(random_chal));
+
+    /* Wait for challenge from the Central */
+    if(!auth_server_recv_challenge(auth_conn, random_chal)) {
+        auth_lib_set_status(auth_conn, AUTH_STATUS_FAILED);
+        return AUTH_ERROR_FAILED;
+    }
+
+    /* check for cancel operation */
+    if(auth_conn->cancel_auth) {
+        auth_lib_set_status(auth_conn, AUTH_STATUS_CANCELED);
+        return AUTH_ERROR_CANCELED;
+    }
+
+    /* Wait for challenge response from the Client */
+    auth_server_recv_chalresp(auth_conn, random_chal, &status);
+
+    auth_lib_set_status(auth_conn, status);
+
+    if(status != AUTH_STATUS_SUCCESSFUL) {
+        LOG_INF("Authentication with Client failed.");
+        return AUTH_ERROR_FAILED;
+    }
+
+    LOG_INF("Authentication with client successful.");
+
+    return AUTH_SUCCESS;
+}
 
 
 /**
@@ -383,95 +568,25 @@ static bool auth_server_recv_chalresp(struct authenticate_conn *auth_conn, uint8
  */
 void auth_chalresp_thread(struct authenticate_conn *auth_conn)
 {
-    enum auth_status status;
-    uint8_t random_chal[AUTH_CHALLENGE_LEN];
+    int ret;
 
     auth_lib_set_status(auth_conn, AUTH_STATUS_STARTED);
 
-    /* generate random number as challenge */
-    sys_rand_get(random_chal, sizeof(random_chal));
-
-
-#if defined(CONFIG_AUTH_CLIENT)
-    int numbytes;
-    struct auth_chalresp_result server_result;
-
-    /* if client role, generate random num and send challenge */
-    if(!auth_conn->is_client) {
-        LOG_ERR("Incorrect configuration, should be client role.");
-        auth_lib_set_status(auth_conn, AUTH_STATUS_FAILED);
-        return;  /* exit thread */
-    }
-
-    if(!auth_client_send_challenge(auth_conn, random_chal)) {
-        auth_lib_set_status(auth_conn, AUTH_STATUS_FAILED);
-        return;
-    }
-
-    /* read response from the sever */
-    if(!auth_client_recv_chal_resp(auth_conn, random_chal, &status)) {
-        auth_lib_set_status(auth_conn, status);
-        return;
-    }
-
-    /* Wait for the final response from the Server indicating success or failure
-     * of the Client's response. */
-
-    numbytes = auth_xport_recv(auth_conn->xport_hdl, (uint8_t*)&server_result,
-                                        sizeof(server_result), AUTH_RX_TIMEOUT_MSEC);
-
-    if((numbytes <= 0) || (numbytes != sizeof(server_result))) {
-        LOG_ERR("Failed to receive server authentication result.");
-        auth_lib_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
-        return;
-    }
-
-    /* check message */
-    if(!auth_check_msg(&server_result.hdr, AUTH_CHALRESP_RESULT_MSG_ID)) {
-        LOG_ERR("Server rejected Client response, authentication failed.");
-        auth_lib_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
-        return;
-    }
-
-    /* check the SErver result */
-    if(server_result.result != 0) {
-        LOG_ERR("Authentication with server failed.");
-        auth_lib_set_status(auth_conn, AUTH_STATUS_AUTHENTICATION_FAILED);
-    } else {
-        LOG_INF("Authentication with server successful.");
-        auth_lib_set_status(auth_conn, AUTH_STATUS_SUCCESSFUL);
-    }
-
-    /* exit thread */
-#else
-
-    /* Check code is configured to run as a Peripheral */
+    // Since a device can be a client and server at the same
+    // time need to use is_client to determine which funcs to call.
+    // refactor this code.
     if(auth_conn->is_client) {
-        LOG_ERR("Incorrect configuration, should be server.");
-        auth_lib_set_status(auth_conn, AUTH_STATUS_FAILED);
-        return;
-    }
-
-    /* Wait for challenge from the Central */
-    if(!auth_server_recv_challenge(auth_conn, random_chal)) {
-        auth_lib_set_status(auth_conn, AUTH_STATUS_FAILED);
-        return;
-    }
-
-    /* Wait for challenge response from the Client */
-    auth_server_recv_chalresp(auth_conn, random_chal, &status);
-
-    if(status == AUTH_STATUS_SUCCESSFUL) {
-        LOG_INF("Authentication with Client successful.");
+        ret = auth_chalresp_client(auth_conn);
     } else {
-        LOG_INF("Authentication with Client failed.");
+        ret = auth_chalresp_server(auth_conn);
     }
 
-    auth_lib_set_status(auth_conn, status);
-
-#endif /* CONFIG_AUTH_CLIENT */
+    if(ret) {
+       LOG_ERR("Challenge-Response authentication failed, err: %d", ret);
+    } else {
+        LOG_INF("Successful Challenge-Response.");
+    }
 
     /* End of Challenge-Response authentication thread */
     LOG_DBG("Challenge-Response thread complete.");
 }
-
