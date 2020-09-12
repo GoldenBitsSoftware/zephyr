@@ -200,7 +200,7 @@ struct auth_tls_certs {
  * from a secure element such as a Microchip ATECC608A or NXP SE050 device.
  */
 struct auth_challenge_resp {
-    const uint8_t *shared_key;
+    const uint8_t *shared_key; /* 32 byte random nonce */
 };
 
 /**

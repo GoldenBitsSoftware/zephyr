@@ -119,8 +119,14 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_tls_c
 
 
 /**
- * Routines to read/write from Authentication service attributes
+ * Initialize Challenge-Response method with additional parameters.
+ *
+ * @param auth_conn   Pointer to Authentication connection struct.
+ * @param chal_resp   Pointer to Challenge-Response params.
+ *
+ * @return  0 on success else one of AUTH_ERROR_* values.
  */
+int auth_init_chalresp_method(struct authenticate_conn *auth_conn, struct auth_challenge_resp *chal_resp);
 
 
 /**

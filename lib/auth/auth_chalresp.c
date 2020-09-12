@@ -103,10 +103,15 @@ struct auth_chalresp_result {
  * @brief  In a production system, the shared key should be stored in a
  * secure hardware store such as an ECC608A or TrustZone.
  */
-static uint8_t shared_key[AUTH_SHARED_KEY_LEN] = {
+static uint8_t default_shared_key[AUTH_SHARED_KEY_LEN] = {
     0xBD, 0x84, 0xDC, 0x6E, 0x5C, 0x77, 0x41, 0x58, 0xE8, 0xFB, 0x1D, 0xB9, 0x95, 0x39, 0x20, 0xE4,
     0xC5, 0x03, 0x69, 0x9D, 0xBC, 0x53, 0x08, 0x20, 0x1E, 0xF4, 0x72, 0x8E, 0x90, 0x56, 0x49, 0xA8 };
 
+/* default shared key if not set */
+static uint8_t *shared_key = default_shared_key;
+
+/* If caller specifies a new shared key, it is copied into this buffer. */
+static uint8_t chalresp_key[AUTH_SHARED_KEY_LEN];
 
 /**
  * Utility function to create the hash of the random challenge and the shared key.
@@ -558,6 +563,26 @@ static int auth_chalresp_server(struct authenticate_conn *auth_conn)
     }
 
     LOG_INF("Authentication with client successful.");
+
+    return AUTH_SUCCESS;
+}
+
+
+/**
+ * @see auth_internal.h
+ */
+int auth_init_chalresp_method(struct authenticate_conn *auth_conn, struct auth_challenge_resp *chal_resp)
+{
+    /* verify inputs */
+    if((auth_conn == NULL) || (chal_resp == NULL)) {
+        return AUTH_ERROR_INVALID_PARAM;
+    }
+
+    /* set new shared key */
+    memcpy(chalresp_key, chal_resp->shared_key, AUTH_SHARED_KEY_LEN);
+
+    /* set shared key pointer to new key */
+    shared_key = chalresp_key;
 
     return AUTH_SUCCESS;
 }

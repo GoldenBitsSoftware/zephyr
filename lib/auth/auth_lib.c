@@ -194,6 +194,18 @@ int auth_lib_init(struct authenticate_conn *auth_conn, enum auth_instance_id ins
 
 #if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
     auth_conn->auth_func = auth_chalresp_thread;
+
+    if((opt_params != NULL) && (opt_params->param_id == AUTH_CHALRESP_PARAM)) {
+
+        struct auth_challenge_resp *chal_resp = &opt_params->param_body.chal_resp;
+
+        err = auth_init_chalresp_method(auth_conn, chal_resp);
+
+        if(err) {
+            LOG_ERR("Failed to set Challege-Response param, err: %d", err);
+            return err;
+        }
+    }
 #endif
 
     /* set auth connect into thread param instance */
