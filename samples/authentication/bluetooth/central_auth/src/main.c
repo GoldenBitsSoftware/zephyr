@@ -84,7 +84,26 @@ static struct auth_optional_param tls_certs_param  = {
 };
 #endif
 
+#if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
 
+#define NEW_SHARED_KEY_LEN          (32u)
+
+/* Use a different key than default */
+static uint8_t chal_resp_sharedkey[NEW_SHARED_KEY_LEN] = {
+    0x21, 0x8e, 0x37, 0x42, 0x1e, 0xe1, 0x2a, 0x22, 0x7c, 0x4b, 0x3f, 0x3f, 0x07, 0x5e, 0x8a, 0xd8,
+    0x24, 0xdf, 0xca, 0xf4, 0x04, 0xd0, 0x3e, 0x22, 0x61, 0x9f, 0x24, 0xa3, 0xc7, 0xf6, 0x5d, 0x66
+};
+
+
+static struct auth_optional_param chal_resp_param  = {
+    .param_id = AUTH_CHALRESP_PARAM,
+        .param_body = {
+            .chal_resp = {
+                .shared_key = chal_resp_sharedkey,
+            },
+        }
+};
+#endif
 
 static struct bt_conn *default_conn;
 static struct bt_uuid_16 uuid = BT_UUID_INIT_16(0);
@@ -554,8 +573,11 @@ void main(void)
 
 
 #if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
-     flags |= AUTH_CONN_CHALLENGE_AUTH_METHOD;
-     printk("Using Challenge-Response authentication method.\n");
+    flags |= AUTH_CONN_CHALLENGE_AUTH_METHOD;
+    
+    /* Use different shared key */
+    opt_parms = &chal_resp_param;
+    printk("Using Challenge-Response authentication method.\n");
 #endif
 
 
