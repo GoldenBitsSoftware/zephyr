@@ -111,10 +111,11 @@ int auth_start_thread(struct authenticate_conn *auth_conn);
  * Initializes DTLS authentication method.
  *
  * @param auth_conn Pointer to Authentication connection struct.
+ * @param certs     Pointer to certs and associated private keys.
  *
  * @return  0 on success else one of AUTH_ERROR_* values.
  */
-int auth_init_dtls_method(struct authenticate_conn *auth_conn);
+int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_tls_certs *certs);
 
 
 /**

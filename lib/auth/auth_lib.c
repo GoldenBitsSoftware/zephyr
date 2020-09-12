@@ -138,9 +138,12 @@ static void auth_thrd_entry(void *arg1, void *arg2, void *arg3)
 /**
  * @see auth_lib.h
  */
-int auth_lib_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_func,
-                  enum auth_instance_id instance, void *context, uint32_t auth_flags)
+int auth_lib_init(struct authenticate_conn *auth_conn, enum auth_instance_id instance,
+                  auth_status_cb_t status_func, void *context, struct auth_optional_param *opt_params,
+                  uint32_t auth_flags)
 {
+    int err = 0;
+
     /* check input params */
     if(status_func == NULL) {
         LOG_ERR("Error, status function is NULL.");
@@ -169,10 +172,19 @@ int auth_lib_init(struct authenticate_conn *auth_conn, auth_status_cb_t status_f
     auth_conn->is_client = (auth_flags & AUTH_CONN_CLIENT) ? true : false;
 
 #if defined(CONFIG_AUTH_DTLS)
-    auth_conn->auth_func = auth_dtls_thead;
 
-    // init TLS layer
-    int err = auth_init_dtls_method(auth_conn);
+    auth_conn->auth_func = auth_dtls_thead;
+    {
+        if(opt_params == NULL || opt_params->param_id != AUTH_TLS_PARAM) {
+            LOG_ERR("Missing certificates for TLS/DTLS authentication.");
+            return AUTH_ERROR_INVALID_PARAM;
+        }
+
+        struct auth_tls_certs *certs = &opt_params->param_body.tls_certs;
+
+        // init TLS layer
+        err = auth_init_dtls_method(auth_conn, certs);
+    }
 
     if(err) {
         LOG_ERR("Failed to initialize MBed TLS, err: %d", err);

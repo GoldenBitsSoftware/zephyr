@@ -14,7 +14,6 @@
 #include <init.h>
 
 
-#include <net/tls_credentials.h>
 
 #if defined(CONFIG_MBEDTLS)
 #if !defined(CONFIG_MBEDTLS_CFG_FILE)
@@ -333,8 +332,8 @@ static void auth_mbed_debug(void *ctx, int level, const char *file,
     }
 
 
-    switch(level)
-    {
+    switch(level) {
+
         case 0:
         {
             LOG_ERR(LOG_FMT, log_strdup(basename), line, log_strdup(str));
@@ -566,7 +565,6 @@ static int auth_tls_set_cookie(struct authenticate_conn *auth_conn)
     uint8_t *cookie_info;
     size_t cookie_len;
 
-
     int ret = bt_conn_get_info(auth_conn->conn, &conn_info);
 
     if(ret) {
@@ -600,23 +598,20 @@ static int auth_tls_set_cookie(struct authenticate_conn *auth_conn)
  * @see auth_internal.h
  *
  */
-int auth_init_dtls_method(struct authenticate_conn *auth_conn)
+int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_tls_certs *certs)
 {
     struct mbed_tls_context *mbed_ctx;
     int ret;
-    void *cred_val;
-    size_t cred_len;
 
     LOG_DBG("Initializing Mbed");
 
-    // set conext pointer
+    /* set context pointer */
     mbed_ctx = auth_get_mbedcontext();
 
     if (mbed_ctx == NULL) {
         LOG_ERR("Unable to allocate Mbed TLS context.");
         return AUTH_ERROR_NO_RESOURCE;
     }
-
 
     /* Init mbed context */
     auth_init_context(mbed_ctx);
@@ -650,19 +645,16 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
      * Production code should set a proper ca chain and use REQUIRED. */
     mbedtls_ssl_conf_authmode(&mbed_ctx->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
 
-    /**
-     * Get pointer to device private key.
-     */
-    ret = tls_credential_get_info(AUTH_DEVICE_CERT_TAG, TLS_CREDENTIAL_PRIVATE_KEY, &cred_val, &cred_len);
 
-    if(ret) {
+    if((certs->device_cert_pem.priv_key == NULL) || (certs->device_cert_pem.priv_key_size == 0)) {
         auth_free_mbedcontext(mbed_ctx);
-        LOG_ERR("Failed to get device private key, error: %d\n", ret);
+        LOG_ERR("Failed to get device private key");
         return AUTH_ERROR_DTLS_INIT_FAILED;
     }
 
 
-    ret = mbedtls_pk_parse_key(&mbed_ctx->device_private_key, cred_val, cred_len, NULL, 0);
+    ret = mbedtls_pk_parse_key(&mbed_ctx->device_private_key, certs->device_cert_pem.priv_key,
+                               certs->device_cert_pem.priv_key_size, NULL, 0);
 
     if (ret) {
         auth_free_mbedcontext(mbed_ctx);
@@ -671,18 +663,17 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
     }
 
     /**
-     * @brief Setup device certs, the CA chain followed by the end device cert.
+     * @brief Setup certs, the CA chain followed by the end device cert.
      */
-    ret = tls_credential_get_info(AUTH_CERT_CA_CHAIN_TAG, TLS_CREDENTIAL_CA_CERTIFICATE, &cred_val, &cred_len);
-
-    if(ret) {
+    if((certs->server_ca_chain_pem.cert == NULL) || (certs->server_ca_chain_pem.cert_size == 0)) {
         auth_free_mbedcontext(mbed_ctx);
-        LOG_ERR("Failed to get cert CA chain, error: %d\n", ret);
+        LOG_ERR("Failed to get CA cert chain");
         return AUTH_ERROR_DTLS_INIT_FAILED;
     }
 
     /* Parse and set the CA certs */
-    ret = mbedtls_x509_crt_parse(&mbed_ctx->cacert, cred_val, cred_len);
+    ret = mbedtls_x509_crt_parse(&mbed_ctx->cacert, certs->server_ca_chain_pem.cert,
+                                 certs->server_ca_chain_pem.cert_size);
 
     if (ret) {
         auth_free_mbedcontext(mbed_ctx);
@@ -694,17 +685,14 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
     mbedtls_ssl_conf_ca_chain(&mbed_ctx->conf, &mbed_ctx->cacert, NULL);
 
     /* Get and parse the device cert */
-    ret = tls_credential_get_info(AUTH_DEVICE_CERT_TAG, TLS_CREDENTIAL_SERVER_CERTIFICATE, &cred_val, &cred_len);
-
-    if(ret) {
+    if((certs->device_cert_pem.cert == NULL) || (certs->device_cert_pem.cert_size == 0)) {
         auth_free_mbedcontext(mbed_ctx);
-        LOG_ERR("Failed to get device cert, error: %d\n", ret);
+        LOG_ERR("Failed to get device cert");
         return AUTH_ERROR_DTLS_INIT_FAILED;
     }
 
-    ret = mbedtls_x509_crt_parse(&mbed_ctx->device_cert,
-                                 (const unsigned char *)cred_val, cred_len);
-
+    ret = mbedtls_x509_crt_parse(&mbed_ctx->device_cert, (const unsigned char *)certs->device_cert_pem.cert,
+                                 certs->device_cert_pem.cert_size);
 
     if (ret) {
         auth_free_mbedcontext(mbed_ctx);
@@ -720,7 +708,6 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
         LOG_ERR("Failed to set device cert and key, error: 0x%x", ret);
         return AUTH_ERROR_DTLS_INIT_FAILED;
     }
-
 
     /* setup call to Zephyr random API */
     mbedtls_ssl_conf_rng(&mbed_ctx->conf, auth_tls_drbg_random, &mbed_ctx->ctr_drbg);
@@ -771,6 +758,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn)
  */
 void auth_dtls_thead(struct authenticate_conn *auth_conn)
 {
+    int bytecount = 0;
     struct mbed_tls_context *mbed_ctx = (struct mbed_tls_context *) auth_conn->internal_obj;
 
     /* Set status */
@@ -797,7 +785,6 @@ void auth_dtls_thead(struct authenticate_conn *auth_conn)
             return;
         }
 
-        int bytecount = 0;
         while(bytecount == 0) {
 
             /* Server wait for client hello */
