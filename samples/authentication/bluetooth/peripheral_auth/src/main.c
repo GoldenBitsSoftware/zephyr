@@ -276,10 +276,14 @@ void main(void)
 
     /* Add certificates to authentication instance.*/
     opt_parms = &tls_certs_param;
+
+    printk("Using DTLS authentication method.\n");
 #endif
 
 #if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
     auth_flags |= AUTH_CONN_CHALLENGE_AUTH_METHOD;
+
+    printk("Using Challenge-Response authentication method.\n");
 #endif
 
     err = auth_lib_init(&auth_conn, AUTH_INST_1_ID, auth_status, NULL, opt_parms, auth_flags);

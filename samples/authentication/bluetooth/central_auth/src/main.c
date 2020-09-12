@@ -544,18 +544,21 @@ void main(void)
 #error Invalid authenticaiton config, either DTLS or Challenge-Response, not both.
 #endif
 
-
-#if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
-     flags |= AUTH_CONN_CHALLENGE_AUTH_METHOD;
-#endif
-
-
 #if defined(CONFIG_AUTH_DTLS)
     flags |= AUTH_CONN_DTLS_AUTH_METHOD;
 
     /* set TLS certs */
     opt_parms = &tls_certs_param;
+    printk("Using DTLS authentication method.\n");
 #endif
+
+
+#if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
+     flags |= AUTH_CONN_CHALLENGE_AUTH_METHOD;
+     printk("Using Challenge-Response authentication method.\n");
+#endif
+
+
 
 
     err = auth_lib_init(&central_auth_conn, AUTH_INST_1_ID, auth_status, NULL, opt_parms, flags);
