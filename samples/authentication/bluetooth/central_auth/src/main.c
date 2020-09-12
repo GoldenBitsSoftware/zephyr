@@ -16,8 +16,6 @@
 #include <device.h>
 #include <drivers/gpio.h>
 
-#include <net/tls_credentials.h>
-
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/hci.h>
 #include <bluetooth/conn.h>
@@ -65,6 +63,25 @@ LOG_MODULE_REGISTER(central_auth, CONFIG_AUTH_LOG_LEVEL);
 static const uint8_t auth_cert_ca_chain[] = AUTH_ROOTCA_CERT_PEM AUTH_INTERMEDIATE_CERT_PEM;
 static const uint8_t auth_dev_client_cert[] = AUTH_CLIENT_CERT_PEM;
 static const uint8_t auth_client_privatekey[] = AUTH_CLIENT_PRIVATE_KEY_PEM;
+
+static struct auth_optional_param tls_certs_param  = {
+    .param_id = AUTH_TLS_PARAM,
+    .param_body = {
+        .tls_certs = {
+            .server_ca_chain_pem = {
+                .cert = auth_cert_ca_chain,
+                .cert_size = sizeof(auth_cert_ca_chain),
+            },
+
+            .device_cert_pem = {
+                .cert = auth_dev_client_cert,
+                .cert_size = sizeof(auth_dev_client_cert),
+                .priv_key = auth_client_privatekey,
+                .priv_key_size = sizeof(auth_client_privatekey)
+            }
+        }
+    }
+};
 #endif
 
 
@@ -132,7 +149,6 @@ void mtu_change_cb(struct bt_conn *conn, u8_t err, struct bt_gatt_exchange_param
         //auth_conn->payload_size = bt_gatt_get_mtu(conn) - BLE_LINK_HEADER_BYTES;
 
         LOG_DBG("Successfuly set MTU to: %d", bt_gatt_get_mtu(conn));
-        //LOG_DBG("Payload size is: %d", auth_conn->payload_size );
     }
 }
 
@@ -281,9 +297,6 @@ static void connected(struct bt_conn *conn, u8_t conn_err)
 
     if (conn == default_conn) {
 
-        /* Save off the bt connection */
-        central_auth_conn.conn = conn;
-
         /* set the max MTU, only for GATT interface */
         mtu_parms.func = mtu_change_cb;
         bt_gatt_exchange_mtu(conn, &mtu_parms);
@@ -307,6 +320,8 @@ static void connected(struct bt_conn *conn, u8_t conn_err)
             LOG_ERR("Discover failed(err %d)", err);
             return;
         }
+
+        central_auth_conn.conn = conn;
     }
 }
 
@@ -412,7 +427,6 @@ static void disconnected(struct bt_conn *conn, u8_t reason)
 
     bt_conn_unref(default_conn);
     default_conn = NULL;
-    central_auth_conn.conn = NULL;
 }
 
 /**
@@ -487,10 +501,11 @@ static int init_button(void)
 }
 
 
-static void auth_status(struct authenticate_conn *auth_conn, enum auth_status status, void *context)
+static void auth_status(struct authenticate_conn *auth_conn,  enum auth_instance_id instance,
+                        enum auth_status status, void *context)
 {
     /* display status */
-    printk("Authentication process status: %s\n", auth_lib_getstatus_str(status));
+    printk("Authentication instance (%d) status: %s\n", instance, auth_lib_getstatus_str(status));
 }
 
 static void process_log_msgs(void)
@@ -516,6 +531,7 @@ static void idle_process(void)
 void main(void)
 {
     int err = 0;
+    struct auth_optional_param *opt_parms = NULL;
 
     log_init();
 
@@ -528,9 +544,6 @@ void main(void)
 #error Invalid authenticaiton config, either DTLS or Challenge-Response, not both.
 #endif
 
-#if defined(CONFIG_AUTH_DTLS)
-     flags |= AUTH_CONN_DTLS_AUTH_METHOD;
-#endif
 
 #if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
      flags |= AUTH_CONN_CHALLENGE_AUTH_METHOD;
@@ -540,30 +553,12 @@ void main(void)
 #if defined(CONFIG_AUTH_DTLS)
     flags |= AUTH_CONN_DTLS_AUTH_METHOD;
 
-    /**
-    * Add certificates to authentication instance.
-    */
-
-    /* Add cert chain and end server cert. */
-    if( (err = tls_credential_add(AUTH_CERT_CA_CHAIN_TAG, TLS_CREDENTIAL_CA_CERTIFICATE,
-		                     auth_cert_ca_chain, sizeof(auth_cert_ca_chain))) != 0 ||
-        (err = tls_credential_add(AUTH_DEVICE_CERT_TAG, TLS_CREDENTIAL_SERVER_CERTIFICATE,
-		                     auth_dev_client_cert, sizeof(auth_dev_client_cert))) != 0)
-    {
-        printk("Failed to add certs, err: %d\n", err);
-        return;
-    }
-
-    /* Add server cert private key. */
-    if((err = tls_credential_add(AUTH_DEVICE_CERT_TAG, TLS_CREDENTIAL_PRIVATE_KEY,
-		                     auth_client_privatekey, sizeof(auth_client_privatekey))) != 0)
-	{
-        printk("Failed to add server private key, err: %d\n", err);
-        return;
-	}
+    /* set TLS certs */
+    opt_parms = &tls_certs_param;
 #endif
 
-    err = auth_lib_init(&central_auth_conn, auth_status, NULL, flags);
+
+    err = auth_lib_init(&central_auth_conn, AUTH_INST_1_ID, auth_status, NULL, opt_parms, flags);
 
     if(err) {
         LOG_ERR("Failed to init authentication service, err: %d.", err);

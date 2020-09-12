@@ -21,9 +21,6 @@
 #include <bluetooth/gatt.h>
 #include <bluetooth/l2cap.h>
 
-#include <net/tls_credentials.h>
-
-
 #include <logging/log.h>
 #include <logging/log_ctrl.h>
 
@@ -82,6 +79,26 @@ static struct authenticate_conn auth_conn;
 static const uint8_t auth_cert_ca_chain[] = AUTH_ROOTCA_CERT_PEM AUTH_INTERMEDIATE_CERT_PEM;
 static const uint8_t auth_dev_server_cert[] = AUTH_SERVER_CERT_PEM;
 static const uint8_t auth_server_privatekey[] = AUTH_SERVER_PRIVATE_KEY_PEM;
+
+
+static struct auth_optional_param tls_certs_param  = {
+    .param_id = AUTH_TLS_PARAM,
+    .param_body = {
+        .tls_certs = {
+            .server_ca_chain_pem = {
+                .cert = auth_cert_ca_chain,
+                .cert_size = sizeof(auth_cert_ca_chain),
+            },
+
+            .device_cert_pem = {
+                .cert = auth_dev_server_cert,
+                .cert_size = sizeof(auth_dev_server_cert),
+                .priv_key = auth_server_privatekey,
+                .priv_key_size = sizeof(auth_server_privatekey)
+            }
+        }
+    }
+};
 #endif
 
 /**
@@ -248,51 +265,29 @@ static void process_log_msgs(void)
 void main(void)
 {
     int err = 0;
+    struct auth_optional_param *opt_parms = NULL;
 
     log_init();
 
     uint32_t auth_flags = AUTH_CONN_SERVER;
 
-
 #if defined(CONFIG_AUTH_DTLS)
     auth_flags |= AUTH_CONN_DTLS_AUTH_METHOD;
 
-    /**
-    * Add certificates to authentication instance.
-    */
-
-    /* Add cert chain and end server cert. */
-    if( (err = tls_credential_add(AUTH_CERT_CA_CHAIN_TAG, TLS_CREDENTIAL_CA_CERTIFICATE,
-		                     auth_cert_ca_chain, sizeof(auth_cert_ca_chain))) != 0 ||
-        (err = tls_credential_add(AUTH_DEVICE_CERT_TAG, TLS_CREDENTIAL_SERVER_CERTIFICATE,
-		                     auth_dev_server_cert, sizeof(auth_dev_server_cert))) != 0)
-    {
-        printk("Failed to add certs, err: %d\n", err);
-        return;
-    }
-
-    /* Add server cert private key. */
-    if((err = tls_credential_add(AUTH_DEVICE_CERT_TAG, TLS_CREDENTIAL_PRIVATE_KEY,
-		                     auth_server_privatekey, sizeof(auth_server_privatekey))) != 0)
-	{
-        printk("Failed to add server private key, err: %d\n", err);
-        return;
-	}
-
+    /* Add certificates to authentication instance.*/
+    opt_parms = &tls_certs_param;
 #endif
 
 #if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
     auth_flags |= AUTH_CONN_CHALLENGE_AUTH_METHOD;
 #endif
 
-
-    err = auth_lib_init(&auth_conn, auth_status, AUTH_INST_1_ID, NULL, auth_flags);
+    err = auth_lib_init(&auth_conn, AUTH_INST_1_ID, auth_status, NULL, opt_parms, auth_flags);
 
     if(err){
         printk("Failed to init authentication service.\n");
         return;
     }
-
 
     err = bt_enable(bt_ready);
     if (err) {
