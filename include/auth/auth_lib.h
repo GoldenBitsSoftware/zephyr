@@ -120,12 +120,6 @@ typedef void (*auth_status_cb_t)(struct authenticate_conn *auth_conn, enum auth_
  */
 struct authenticate_conn
 {
-    // DAG DEBUG BEG
-    // should this Bluetooth specific transport struct be here?
-    // Already passing in   struct auth_xp_bt_params xport_params
-    struct bt_conn *conn;
-    // DAG DEBUG END
-
     bool is_client;  /* True if client */
 
     /* lower transport opaque handle */

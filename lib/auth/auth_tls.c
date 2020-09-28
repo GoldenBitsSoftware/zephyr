@@ -42,7 +42,8 @@ LOG_MODULE_DECLARE(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 #include "auth_internal.h"
 
 
-#define MAX_MBEDTLS_CONTEXT     2
+#define MAX_MBEDTLS_CONTEXT     (2u)
+#define DTLS_COOKIE_LEN         (16u)
 
 
 #define USE_DTLS  1  /* TODO: Make this a KConfig var */
@@ -241,15 +242,14 @@ static unsigned long auth_tls_timing_get_timer( struct mbedtls_timing_hr_time *v
     unsigned long *mssec = (unsigned long*) val;
     unsigned long cur_msg = k_uptime_get_32();
 
-    if( reset )
-    {
+    if(reset) {
         *mssec = cur_msg;
-        return ( 0 );
+        return 0;
     }
 
     delta = cur_msg - *mssec;
 
-    return ( delta );
+    return delta;
 }
 
 /*
@@ -262,8 +262,9 @@ static void auth_tls_timing_set_delay( void *data, uint32_t int_ms, uint32_t fin
     ctx->int_ms = int_ms;
     ctx->fin_ms = fin_ms;
 
-    if( fin_ms != 0 )
-        (void) auth_tls_timing_get_timer( &ctx->timer, 1 );
+    if( fin_ms != 0 ) {
+        (void) auth_tls_timing_get_timer(&ctx->timer, 1);
+    }
 }
 
 /*
@@ -271,21 +272,24 @@ static void auth_tls_timing_set_delay( void *data, uint32_t int_ms, uint32_t fin
  */
 static int auth_tls_timing_get_delay( void *data )
 {
-    mbedtls_timing_delay_context *ctx = (mbedtls_timing_delay_context *) data;
+    mbedtls_timing_delay_context *ctx = (mbedtls_timing_delay_context *)data;
     unsigned long elapsed_ms;
 
-    if( ctx->fin_ms == 0 )
-        return( -1 );
+    if( ctx->fin_ms == 0 ) {
+        return -1;
+    }
 
-    elapsed_ms = auth_tls_timing_get_timer( &ctx->timer, 0 );
+    elapsed_ms = auth_tls_timing_get_timer(&ctx->timer, 0);
 
-    if( elapsed_ms >= ctx->fin_ms )
-        return( 2 );
+    if(elapsed_ms >= ctx->fin_ms) {
+        return 2;
+    }
 
-    if( elapsed_ms >= ctx->int_ms )
-        return( 1 );
+    if(elapsed_ms >= ctx->int_ms) {
+        return 1;
+    }
 
-    return( 0 );
+    return 0;
 }
 
 static int auth_tls_drbg_random(void *ctx, unsigned char *rand_buf, size_t number)
@@ -561,33 +565,18 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
  */
 static int auth_tls_set_cookie(struct authenticate_conn *auth_conn)
 {
-    struct bt_conn_info conn_info;
-    uint8_t *cookie_info;
-    size_t cookie_len;
-
-    int ret = bt_conn_get_info(auth_conn->conn, &conn_info);
-
-    if(ret) {
-        return ret;
-    }
-
+    uint8_t cookie_val[DTLS_COOKIE_LEN]
     struct mbed_tls_context *mbed_ctx = (struct mbed_tls_context *)auth_conn->internal_obj;
 
-    // should not be NULL!!
+    /* should not be NULL!!  */
     if(!mbed_ctx) {
         LOG_ERR("No MBED context.");
         return AUTH_ERROR_INVALID_PARAM;
     }
 
-    if(BT_CONN_TYPE_LE & conn_info.type) {
-        cookie_info = (uint8_t*)conn_info.le.local->a.val;
-        cookie_len = sizeof(conn_info.le.local->a.val);
-    } else {
-        cookie_info = (uint8_t*)conn_info.br.dst->val;
-        cookie_len = sizeof(conn_info.br.dst->val);
-    }
+    sys_rand_get(cookie_val, sizeof(cookie_val));
 
-    ret = mbedtls_ssl_set_client_transport_id(&mbed_ctx->ssl, cookie_info, cookie_len);
+    ret = mbedtls_ssl_set_client_transport_id(&mbed_ctx->ssl, cookie_val, sizeof(cookie_val));
 
     return ret;
 }
@@ -729,7 +718,6 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_tls_c
 
         mbedtls_ssl_conf_dtls_cookies(&mbed_ctx->conf, mbedtls_ssl_cookie_write, mbedtls_ssl_cookie_check,
                                       &mbed_ctx->cookie_ctx);
-
     }
 
 
