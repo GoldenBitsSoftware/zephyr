@@ -67,5 +67,13 @@ if AUTH_LIB
 	    connected Peripherals.
 
 
+	config AUTH_ATECC608A_ACCEL
+            bool "Use Microchip ATECC608A hardware acceleration."	
+            default n
+            help
+            Enable funcitons to use Micochip ATECC 608A for authenticaiton purposes.
+	
+
+
 endif
 
