@@ -525,7 +525,7 @@ ssize_t auth_xp_bt_central_write(struct bt_conn *conn, const struct bt_gatt_attr
 
     LOG_DBG("client write called, len: %d", len);
 
-    // put the received bytes into the receive queue
+    /* put the received bytes into the receive queue */
 #ifdef CONFIG_AUTH_FRAGMENT
     auth_message_hdr_to_cpu((struct auth_message_frag_hdr *)buf);
     int err = auth_message_assemble(bt_xp_conn->xporthdl, buf, len);

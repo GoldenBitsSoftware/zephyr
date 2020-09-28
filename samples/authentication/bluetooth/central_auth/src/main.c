@@ -574,7 +574,7 @@ void main(void)
 
 #if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
     flags |= AUTH_CONN_CHALLENGE_AUTH_METHOD;
-    
+
     /* Use different shared key */
     opt_parms = &chal_resp_param;
     printk("Using Challenge-Response authentication method.\n");
