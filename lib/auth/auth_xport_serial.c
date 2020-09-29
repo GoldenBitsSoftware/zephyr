@@ -199,11 +199,9 @@ static void auth_xp_serial_recv_thrd(void *arg1, void *arg2, void *arg3)
 {
     struct serial_xp_instance *xp_inst = (struct serial_xp_instance *)arg1;
 
-    while (true)
-    {
+    while (true) {
 
 #ifdef CONFIG_AUTH_FRAGMENT
-
         struct serial_msgfrag_recv frag_msg;
 
         if(k_msgq_get(&xp_inst->frag_rx_queue, &frag_msg, K_FOREVER) == 0) {
@@ -402,7 +400,6 @@ static void auth_xp_serial_irq_cb(void *user_data)
         xp_inst->curr_tx_cnt = 0;
     }
 
-    //LOG_ERR("Send %d bytes", total_cnt);
 }
 
 

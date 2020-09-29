@@ -71,7 +71,7 @@ struct auth_xport_instance
     uint32_t payload_size;  // TODO, need to set/check how used.
 };
 
-// allocate instances??
+/* transport instances */
 static struct auth_xport_instance xport_inst[CONFIG_NUM_AUTH_INSTANCES];
 
 
@@ -638,9 +638,6 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
         num_fragments++;
     }
 
-// DAG DEBUG BEG
-    LOG_ERR("** Sent %d total bytes.", send_count);
-// DAG DEBUG END
     return send_count;
 
 #endif
@@ -763,8 +760,7 @@ bool auth_message_get_fragment(const uint8_t *buffer, uint16_t buflen, uint16_t 
     bool found_sync_bytes = false;
 
     /* quick check */
-    if(buflen < XPORT_MIN_FRAGMENT)
-    {
+    if(buflen < XPORT_MIN_FRAGMENT) {
         return false;
     }
 
