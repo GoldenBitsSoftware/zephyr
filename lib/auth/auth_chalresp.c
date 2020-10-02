@@ -215,7 +215,18 @@ static bool auth_client_recv_chal_resp(struct authenticate_conn *auth_conn, cons
 
     while(len > 0) {
 
-        numbytes = auth_xport_recv(auth_conn->xport_hdl, buf, len, 3000);
+        numbytes = auth_xport_recv(auth_conn->xport_hdl, buf, len, AUTH_RX_TIMEOUT_MSEC);
+
+        /* canceled ? */
+        if(auth_conn->cancel_auth) {
+            *status = AUTH_STATUS_CANCELED;
+            return false;
+        }
+
+        /* timed out, try to read agian */
+        if(numbytes == -EAGAIN) {
+            continue;
+        }
 
         if(numbytes <= 0) {
             LOG_ERR("Failed to read server challenge response, err: %d", numbytes);
@@ -309,9 +320,16 @@ static bool auth_server_recv_msg(struct authenticate_conn *auth_conn, uint8_t *m
 
     while((int)msglen > 0) {
 
-        // TODO: Add receive timeout function
-        // TODO:  Add retry? Add ability to cancel when waiting for data
-       numbytes = auth_xport_recv(auth_conn->xport_hdl, msgbuf, msglen, 30000);
+       numbytes = auth_xport_recv(auth_conn->xport_hdl, msgbuf, msglen, AUTH_RX_TIMEOUT_MSEC);
+
+       if(auth_conn->cancel_auth) {
+           return false;
+       }
+
+       /* timed out, retry */
+       if(numbytes == -EAGAIN) {
+           continue;
+       }
 
         if(numbytes <= 0) {
             return false;
@@ -436,7 +454,7 @@ static bool auth_server_recv_chalresp(struct authenticate_conn *auth_conn, uint8
 
     /* verify Central's response */
     if(memcmp(hash, client_resp.client_response, sizeof(hash))) {
-        /* authenatication failed, the Client did not sent the correct response */
+        /* authentication failed, the Client did not sent the correct response */
         result_resp.result = 1;
     }
 
@@ -478,7 +496,6 @@ static int auth_chalresp_client(struct authenticate_conn *auth_conn)
 
     /* check for cancel operation */
     if(auth_conn->cancel_auth) {
-        auth_lib_set_status(auth_conn, AUTH_STATUS_CANCELED);
         return AUTH_ERROR_CANCELED;
     }
 
@@ -495,7 +512,6 @@ static int auth_chalresp_client(struct authenticate_conn *auth_conn)
 
     /* check for cancel operation */
     if(auth_conn->cancel_auth) {
-        auth_lib_set_status(auth_conn, AUTH_STATUS_CANCELED);
         return AUTH_ERROR_CANCELED;
     }
 
@@ -548,7 +564,6 @@ static int auth_chalresp_server(struct authenticate_conn *auth_conn)
 
     /* check for cancel operation */
     if(auth_conn->cancel_auth) {
-        auth_lib_set_status(auth_conn, AUTH_STATUS_CANCELED);
         return AUTH_ERROR_CANCELED;
     }
 
@@ -589,7 +604,9 @@ int auth_init_chalresp_method(struct authenticate_conn *auth_conn, struct auth_c
 
 
 /**
- * @brief  Use hash (SHA-256) with shared key to authenticate each side.
+ * Use hash (SHA-256) with shared key to authenticate each side.
+ *
+ * @param auth_conn  The authenticate_conn connection.
  */
 void auth_chalresp_thread(struct authenticate_conn *auth_conn)
 {
@@ -597,9 +614,10 @@ void auth_chalresp_thread(struct authenticate_conn *auth_conn)
 
     auth_lib_set_status(auth_conn, AUTH_STATUS_STARTED);
 
-    // Since a device can be a client and server at the same
-    // time need to use is_client to determine which funcs to call.
-    // refactor this code.
+    /**
+     * Since a device can be a client and server at the same
+     * time need to use is_client to determine which funcs to call.
+     * refactor this code. */
     if(auth_conn->is_client) {
         ret = auth_chalresp_client(auth_conn);
     } else {

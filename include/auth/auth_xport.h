@@ -7,7 +7,7 @@
 #ifndef ZEPHYR_INCLUDE_AUTH_XPORT_H_
 #define ZEPHYR_INCLUDE_AUTH_XPORT_H_
 
-#ifdef CONFIG_BT_XPORT
+#if defined(CONFIG_BT_XPORT)
 #include <bluetooth/gatt.h>
 #endif
 
@@ -32,8 +32,7 @@ typedef void * auth_xport_hdl_t;
 /**
  * Transport event type.
  */
-enum auth_xport_evt_type
-{
+enum auth_xport_evt_type {
     XP_EVT_NONE = 0,
     XP_EVT_CONNECT,
     XP_EVT_DISCONNECT,
@@ -46,8 +45,7 @@ enum auth_xport_evt_type
 /**
  * Transport event structure
  */
-struct auth_xport_evt
-{
+struct auth_xport_evt {
     enum auth_xport_evt_type event;
 
     /* transport specific event information */
@@ -81,10 +79,10 @@ typedef int(*send_xport_t)(auth_xport_hdl_t xport_hdl, const uint8_t *data, cons
 /**
  * Initializes the lower transport layer.
  *
- * @param xporthdl
- * @param instance
+ * @param xporthdl   New transport handle is returned here.
+ * @param instance   Authentication instance.
  *
- * @return
+ * @return 0 on success, else negative error number.
  */
 int auth_xport_init(auth_xport_hdl_t *xporthdl,  enum auth_instance_id instance, void *xport_params);
 
@@ -233,10 +231,12 @@ void *auth_xport_get_context(auth_xport_hdl_t xporthdl);
 int auth_xport_get_max_payload(const auth_xport_hdl_t xporthdl);
 
 
-#ifdef CONFIG_BT_XPORT
+#if defined(CONFIG_BT_XPORT)
 
-struct auth_xp_bt_params
-{
+/**
+ * Bluetooth params.
+ */
+struct auth_xp_bt_params {
     struct bt_conn *conn;
     bool is_central;
 
@@ -251,26 +251,49 @@ struct auth_xp_bt_params
 
 /**
  * Initialize Bluetooth transport
+ *
+ * @param xport_hdl    Transport handle.
+ * @param flags        Reserved for future use, should be set to 0.
+ * @param xport_param  Pointer to Bluetooth transport params for use by BT layer.
  */
 int auth_xp_bt_init(const auth_xport_hdl_t xport_hdl, uint32_t flags, void *xport_param);
 
 
 /**
- * Deinit
+ * Deinit the lower BT later.
+ *
+ * @param xport_hdl  The transport handle to de-initialize.
+ *
+ * @return 0 on success, else negative error number.
  */
 int auth_xp_bt_deinit(const auth_xport_hdl_t xport_hdl);
 
 /*
  * Called when the Central (client) writes to a Peripheral (server) characteristic.
+ *
+ * @param conn   The BT connection.
+ * @param attr   GATT attribute to write to.
+ * @param buf    Data to write.
+ * @param len    Number of bytes to write.
+ * @param offset Offset to start writing from.
+ * @param flags  BT_GATT_WRITE_* flags
+ *
+ * @return  Number of bytes written.
  */
 ssize_t auth_xp_bt_central_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                                    const void *buf, u16_t len, u16_t offset, u8_t flags);
 
 
-
 /**
- * Called on the Central (client) when a Peripheral (server) writes/updates a characteristic.
+ * Called by the Central (client) when a Peripheral (server) writes/updates a characteristic.
  * This function is called by the Central BT stack when data is received by the Peripheral (server)
+ *
+ * @param conn    Bluetooth connection struct.
+ * @param params  Gatt subscription params.
+ * @param data    Data from peripheral.
+ * @param length  Number of bytes reived.
+ *
+ * @return BT_GATT_ITER_CONTINUE or BT_GATT_ITER_STOP
  */
 u8_t auth_xp_bt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
                                    const void *data, u16_t length);
@@ -296,24 +319,36 @@ int auth_xp_bt_event(const auth_xport_hdl_t xporthdl, struct auth_xport_evt *eve
  */
 int auth_xp_bt_get_max_payload(const auth_xport_hdl_t xporthdl);
 
-#endif
+#endif  /* CONFIG_BT_XPORT */
 
-#ifdef CONFIG_SERIAL_XPORT
 
-struct auth_xp_serial_params
-{
-    struct device *uart_dev; /* pointer to Uart instance */
-    uint16_t payload_size;
+#if defined(CONFIG_SERIAL_XPORT)
+
+/**
+ * Serial transport param.
+ */
+struct auth_xp_serial_params {
+    struct device *uart_dev;  /* pointer to Uart instance */
 };
 
 /**
  * Initialize Serial lower layer transport.
+ *
+ * @param xport_hdl      Transport handle.
+ * @param flags          RFU (Reserved for future use), set to 0.
+ * @param xport_params   Serial specific transport parameters.
+ *
+ * @return 0 on success, else negative value.
  */
 int auth_xp_serial_init(const auth_xport_hdl_t xport_hdl, uint32_t flags, void *xport_param);
 
 
 /**
- * Deinit
+ * Deinit lower serial transport.
+ *
+ * @param xport_hdl  Transport handle
+ *
+ * @return 0 on success, else negative value.
  */
 int auth_xp_serial_deinit(const auth_xport_hdl_t xport_hdl);
 
@@ -338,7 +373,7 @@ int auth_xp_serial_event(const auth_xport_hdl_t xporthdl, struct auth_xport_evt 
  */
 int auth_xp_serial_get_max_payload(const auth_xport_hdl_t xporthdl);
 
-#endif
+#endif  /* CONFIG_SERIAL_XPORT */
 
 
 #endif  /* ZEPHYR_INCLUDE_AUTH_XPORT_H_ */

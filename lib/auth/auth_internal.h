@@ -7,9 +7,9 @@
 #ifndef ZEPHYR_INCLUDE_AUTH_INTERNAL_H_
 #define ZEPHYR_INCLUDE_AUTH_INTERNAL_H_
 
-
-
-
+/**
+ * Thread params
+ */
 struct auth_thread_params {
     volatile struct authenticate_conn *auth_conn;
     struct k_sem *thrd_sem;
@@ -19,11 +19,6 @@ struct auth_thread_params {
 /**
  * @brief  Timeout in Msec when waiting for GATT read/write to complete.
  */
-
-// DAG DEBUG BEG
-//#define AUTH_SVC_IO_TIMEOUT_MSEC            (15000u)
-#define AUTH_SVC_IO_TIMEOUT_MSEC            (60000u)
-// DAG DEBUG END
 
 
 #define AUTH_RING_BUFLEN         (200u)
@@ -44,7 +39,7 @@ struct auth_ringbuf {
 };
 
 
-#ifdef CONFIG_AUTH_FRAGMENT
+#if defined(CONFIG_AUTH_FRAGMENT)
 
 /**
  * Defines to handle message fragmentation over the different transports.
@@ -94,7 +89,7 @@ struct auth_message_fragment {
 #pragma pack(pop)
 
 
-#endif
+#endif  /*  CONFIG_AUTH_FRAGMENT */
 
 
 /**
@@ -250,8 +245,7 @@ int auth_server_tx(struct authenticate_conn *conn, const unsigned char *data, si
  */
 int auth_sever_rx(struct authenticate_conn *conn, uint8_t *buf, size_t len);
 
-#ifdef CONFIG_AUTH_FRAGMENT
-
+#if defined(CONFIG_AUTH_FRAGMENT)
 
 /**
  * Scans buffer to determine if a fragment is present.
@@ -295,7 +289,7 @@ void auth_message_hdr_to_cpu(struct auth_message_frag_hdr *frag_hdr);
  */
 void auth_message_hdr_to_be16(struct auth_message_frag_hdr *frag_hdr);
 
-#endif
+#endif  /* CONFIG_AUTH_FRAGMENT */
 
 
 void auth_ringbuf_init(struct auth_ringbuf *ringbuf);

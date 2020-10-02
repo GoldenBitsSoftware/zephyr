@@ -63,13 +63,22 @@ K_THREAD_DEFINE(auth_tid_2, AUTH_THRD_STACK_SIZE,
 #endif
 
 
-
+/**
+ * Forward function declarations for authentication threads.
+ */
 void auth_dtls_thead(struct authenticate_conn *auth_conn);
 void auth_chalresp_thread(struct authenticate_conn *auth_conn);
 
 
 /* ========================== local functions ========================= */
 
+/**
+ * Check auth flags consistency.
+ *
+ * @param flags Flags to check.
+ *
+ * @return  true if flags are correct, else false.
+ */
 static bool auth_lib_checkflags(uint32_t flags)
 {
     /* stub for now */
@@ -100,15 +109,12 @@ static void auth_lib_status_work(struct k_work *work)
 }
 
 
-/* ========================= Internal  API ============================ */
-
-
 /**
  * Auth thread starts during boot and waits on semaphore.
  *
- * @param arg1
- * @param arg2
- * @param arg3
+ * @param arg1  Pointer to struct auth_thread_parms.
+ * @param arg2  Unused
+ * @param arg3  Unused
  */
 static void auth_thrd_entry(void *arg1, void *arg2, void *arg3)
 {
@@ -125,7 +131,7 @@ static void auth_thrd_entry(void *arg1, void *arg2, void *arg3)
             return;
         }
 
-        /* call auth thread */
+        /* call auth thread function */
         thrd_params->auth_conn->auth_func(thrd_params->auth_conn);
     }
 }
@@ -173,6 +179,7 @@ int auth_lib_init(struct authenticate_conn *auth_conn, enum auth_instance_id ins
 
 #if defined(CONFIG_AUTH_DTLS)
 
+    /* Set the DTLS authentication thread */
     auth_conn->auth_func = auth_dtls_thead;
     {
         if(opt_params == NULL || opt_params->param_id != AUTH_TLS_PARAM) {
@@ -193,6 +200,8 @@ int auth_lib_init(struct authenticate_conn *auth_conn, enum auth_instance_id ins
 #endif
 
 #if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
+
+    /* Set the Challenge-Response authentication thread */
     auth_conn->auth_func = auth_chalresp_thread;
 
     if((opt_params != NULL) && (opt_params->param_id == AUTH_CHALRESP_PARAM)) {
@@ -219,8 +228,8 @@ int auth_lib_init(struct authenticate_conn *auth_conn, enum auth_instance_id ins
  */
 int auth_lib_deinit(struct authenticate_conn *auth_conn)
 {
-    /* TBD: Free any resources */
-
+    /* Free any resources, nothing for now, but maybe
+     * needed in the future */
     return AUTH_SUCCESS;
 }
 
@@ -242,7 +251,7 @@ int auth_lib_cancel(struct authenticate_conn *auth_conn)
 {
     auth_conn->cancel_auth = true;
 
-    auth_lib_set_status(auth_conn, AUTH_STATUS_CANCEL_PENDING);
+    auth_lib_set_status(auth_conn, AUTH_STATUS_CANCELED);
 
     return AUTH_SUCCESS;
 }

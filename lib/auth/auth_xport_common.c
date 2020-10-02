@@ -52,9 +52,11 @@ struct auth_message_recv
     bool rx_first_frag;
 };
 
-// ---------------- API ---------------------
-struct auth_xport_instance
-{
+/**
+ * Transport instance, contains send and recv circular queues.
+ */
+struct auth_xport_instance {
+    /* Send & Recv circular queues */
     struct auth_xport_io_buffer send_buf;
     struct auth_xport_io_buffer recv_buf;
 
@@ -63,12 +65,12 @@ struct auth_xport_instance
     /* If the lower transport has a send function */
     send_xport_t send_func;
 
-#ifdef CONFIG_AUTH_FRAGMENT
+#if defined(CONFIG_AUTH_FRAGMENT)
     /* Struct for handling assembling message from multile fragments */
     struct auth_message_recv recv_msg;
 #endif
 
-    uint32_t payload_size;  // TODO, need to set/check how used.
+    uint32_t payload_size;  /* Max payload size for lower transport. */
 };
 
 /* transport instances */
@@ -76,10 +78,15 @@ static struct auth_xport_instance xport_inst[CONFIG_NUM_AUTH_INSTANCES];
 
 
 /* ================ local static funcs ================== */
+
 /**
+ *  Initializes common transport IO buffers.
  *
+ *  @param iobuf  Pointer to IO buffer to initialize.
+ *
+ *  @return 0 for success, else negative error value.
  */
-static int auth_xport_iobuffer_init(struct auth_xport_io_buffer *iobuf)
+static void auth_xport_iobuffer_init(struct auth_xport_io_buffer *iobuf)
 {
     /* init mutex*/
     k_mutex_init(&iobuf->buf_mutex);
@@ -90,28 +97,32 @@ static int auth_xport_iobuffer_init(struct auth_xport_io_buffer *iobuf)
     iobuf->head_index = 0;
     iobuf->tail_index = 0;
     iobuf->num_valid_bytes = 0;
-
-    return AUTH_SUCCESS;
 }
 
 /**
  * Reset queue counters
  *
- * @param iobuf
- * @return
+ *  @param iobuf  Pointer to IO buffer to reset.
+ *
+ * @return 0 for success
  */
-static int auth_xport_iobuffer_reset(struct auth_xport_io_buffer *iobuf)
+static void auth_xport_iobuffer_reset(struct auth_xport_io_buffer *iobuf)
 {
     iobuf->head_index = 0;
     iobuf->tail_index = 0;
     iobuf->num_valid_bytes = 0;
-
-    return AUTH_SUCCESS;
 }
 
 
 /**
+ * Puts data into the transport buffer.
  *
+ * @param iobuf      IO buffer to add data.
+ * @param in_buf     Data to put into IO buffer.
+ * @param num_bytes  Number of bytes to put.
+ *
+ * @return On success, number of bytes put into IO buffer, can be less than requested.
+ *         Negative number on error.
  */
 static int auth_xport_buffer_put(struct auth_xport_io_buffer *iobuf, const uint8_t *in_buf, size_t num_bytes)
 {
@@ -276,6 +287,16 @@ static int auth_xport_buffer_peek(struct auth_xport_io_buffer *iobuf, uint8_t *o
 
 }
 
+/**
+ * Gets data from a IO buffer.
+ *
+ * @param iobuf       IO buffer to get data from.
+ * @param out_buf     Buffer to copy bytes into.
+ * @param num_bytes   Number of bytes requested.
+ *
+ * @return On success, number of bytes copied into buffer.  Can be less than requested.
+ *         Negative number on error.
+ */
 static int auth_xport_buffer_get(struct auth_xport_io_buffer *iobuf, uint8_t *out_buf, size_t num_bytes)
 {
     /* if no valid bytes, just return zero */
@@ -347,6 +368,17 @@ static int auth_xport_buffer_get(struct auth_xport_io_buffer *iobuf, uint8_t *ou
 }
 
 
+/**
+ * Get data from an IO buffer, if no data present wait.
+ *
+ * @param iobuf      The IO buffer to get from.
+ * @param out_buf    Buffer to copy bytes into.
+ * @param num_bytes  Number of bytes requested.
+ * @param waitmsec   Number of milliseconds to wait if no data.
+ *
+ * @return  On success, number of bytes copied, can be less than requested amount.
+ *          Negative number on error. -EAGAIN if a timeout occurred.
+ */
 static int auth_xport_buffer_get_wait(struct auth_xport_io_buffer *iobuf, uint8_t *out_buf,
                                       int num_bytes, int waitmsec)
 {
@@ -373,7 +405,13 @@ static int auth_xport_buffer_get_wait(struct auth_xport_io_buffer *iobuf, uint8_
     return bytecount;
 }
 
-
+/**
+ * Get the number of bytes in an IO buffer.
+ *
+ * @param iobuf  The IO buffer to check.
+ *
+ * @return On success, number of bytes.  Negative number on error.
+ */
 static int auth_xport_buffer_bytecount(struct auth_xport_io_buffer *iobuf)
 {
     int err = k_mutex_lock(&iobuf->buf_mutex, K_FOREVER);
@@ -388,9 +426,16 @@ static int auth_xport_buffer_bytecount(struct auth_xport_io_buffer *iobuf)
     return err;
 }
 
+
 /**
- * Wait for bytes to be
- * @return
+ * Wait for a non-zero byte count.  Used to wait until data is received from the sender.
+ * Wait until waitmsec has timed out or data has been received.
+ *
+ * @param iobuf     IO buffer to wait on bytes.
+ * @param waitmsec  Number of milliseconds to wait.
+ *
+ * @return  On success, number of bytes in the IO buffer.
+ *          -EAGAIN on timeout.
  */
 static int auth_xport_buffer_bytecount_wait(struct auth_xport_io_buffer *iobuf, uint32_t waitmsec)
 {
@@ -413,7 +458,13 @@ static int auth_xport_buffer_bytecount_wait(struct auth_xport_io_buffer *iobuf, 
 }
 
 
-
+/**
+ * Get the frees pace within an IO bufer.
+ *
+ * @param iobuf   IO Buffer to check.
+ *
+ * @return Amount of free space.
+ */
 static int auth_xport_buffer_avail_bytes(struct auth_xport_io_buffer *iobuf)
 {
     return sizeof(iobuf->io_buffer) - auth_xport_buffer_bytecount(iobuf);
@@ -442,7 +493,7 @@ static int auth_xport_internal_send(const auth_xport_hdl_t xporthdl, const uint8
     return auth_xport_buffer_put(&xp_inst->send_buf, data, len);
 }
 
-#ifdef CONFIG_AUTH_FRAGMENT
+#if defined(CONFIG_AUTH_FRAGMENT)
 /**
  * Initializes message receive struct.  Used to re-assemble message
  * fragments recevied.
@@ -476,14 +527,14 @@ int auth_xport_init(auth_xport_hdl_t *xporthdl, enum auth_instance_id instance, 
     auth_xport_iobuffer_init(&xport_inst[instance].send_buf);
     auth_xport_iobuffer_init(&xport_inst[instance].recv_buf);
 
-#ifdef CONFIG_AUTH_FRAGMENT
+#if defined(CONFIG_AUTH_FRAGMENT)
     auth_message_frag_init(&xport_inst[instance].recv_msg);
 #endif
 
 
-#if CONFIG_BT_XPORT
+#if defined(CONFIG_BT_XPORT)
     ret = auth_xp_bt_init(*xporthdl, 0, xport_params);
-#elif CONFIG_SERIAL_XPORT
+#elif defined(CONFIG_SERIAL_XPORT)
     ret = auth_xp_serial_init(*xporthdl, 0, xport_params);
 #else
 #error No lower transport defined.
@@ -509,9 +560,9 @@ int auth_xport_deinit(const auth_xport_hdl_t xporthdl)
     auth_xport_iobuffer_reset(&xp_inst->recv_buf);
 
 
-#if CONFIG_BT_XPORT
+#if defined(CONFIG_BT_XPORT)
     ret = auth_xp_bt_deinit(xporthdl);
-#elif CONFIG_SERIAL_XPORT
+#elif defined(CONFIG_SERIAL_XPORT)
     ret = auth_xp_serial_deinit(xporthdl);
 #else
 #error No lower transport defined.
@@ -527,9 +578,9 @@ int auth_xport_event(const auth_xport_hdl_t xporthdl, struct auth_xport_evt *eve
 {
     int ret = 0;
 
-#if CONFIG_BT_XPORT
+#if defined(CONFIG_BT_XPORT)
     ret = auth_xp_bt_event(xporthdl, event);
-#elif CONFIG_SERIAL_XPORT
+#elif defined(CONFIG_SERIAL_XPORT)
     ret = auth_xp_serial_event(xporthdl, event);
 #else
 #error No lower transport defined.
@@ -538,13 +589,16 @@ int auth_xport_event(const auth_xport_hdl_t xporthdl, struct auth_xport_evt *eve
     return ret;
 }
 
+/**
+ * @see auth_xport.h
+ */
 int auth_xport_get_max_payload(const auth_xport_hdl_t xporthdl)
 {
     int mtu = 0;
 
-#if CONFIG_BT_XPORT
+#if defined(CONFIG_BT_XPORT)
    mtu = auth_xp_bt_get_max_payload(xporthdl);
-#elif CONFIG_SERIAL_XPORT
+#elif defined(CONFIG_SERIAL_XPORT)
     mtu = auth_xp_serial_get_max_payload(xporthdl);
 #else
 #error No lower transport defined.
@@ -581,7 +635,7 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
     }
 
     /* if we're not message fragmentation */
-#ifndef CONFIG_AUTH_FRAGMENT
+#if !defined(CONFIG_AUTH_FRAGMENT)
     return auth_xport_internal_send(xporthdl, data, len);
 #else
     /* set frame header */
@@ -639,11 +693,8 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
     }
 
     return send_count;
-
-#endif
+#endif  /* CONFIG_AUTH_FRAGMENT */
 }
-
-
 
 
 /**
@@ -747,7 +798,7 @@ int auth_xport_getnum_recvqueue_bytes_wait(const auth_xport_hdl_t xporthdl, uint
 
 
 
-#ifdef CONFIG_AUTH_FRAGMENT
+#if defined(CONFIG_AUTH_FRAGMENT)
 
 /**
  * @see auth_internal.h
@@ -807,8 +858,6 @@ bool auth_message_get_fragment(const uint8_t *buffer, uint16_t buflen, uint16_t 
 
     return true;
 }
-
-
 
 /**
  * @see auth_internal.h
@@ -947,7 +996,7 @@ void auth_message_hdr_to_be16(struct auth_message_frag_hdr *frag_hdr)
     frag_hdr->payload_len = sys_cpu_to_be16(frag_hdr->payload_len);
 }
 
-#endif
+#endif  /* CONFIG_AUTH_FRAGMENT */
 
 /**
  * @see auth_xport.h

@@ -53,6 +53,10 @@ LOG_MODULE_DECLARE(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 #define DTLS_PACKET_SYNC_BYTES      0x45B8
 #define DTLS_HEADER_BYTES           (sizeof(struct dtls_packet_hdr))
 
+#define AUTH_DTLS_MIN_TIMEOUT       (10000u)
+#define ATUH_DTLS_MAX_TIMEOUT       (30000u)
+
+
 /**
  * Header identifying a DTLS packet (aka datagram).  Unlike TLS, DTLS packets
  * must be forwarded to Mbedtls as one or more complete packets.  TLS is
@@ -84,7 +88,7 @@ struct mbed_tls_context {
     mbedtls_timing_delay_context timer;
     mbedtls_ssl_cookie_ctx cookie_ctx;
 
-#ifdef USE_DTLS
+#if defined(USE_DTLS)
     /* Temp buffer used to assemble full frame when sending. */
     uint8_t temp_dtlsbuf[CONFIG_MBEDTLS_SSL_MAX_CONTENT_LEN];
 #endif
@@ -441,7 +445,8 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
     int rx_bytes = 0;
 
-#ifndef USE_DTLS
+#if !defined(USE_DTLS)
+
     /* For TLS just copy bytes, no need to handle DTLS packet boundary. */
     rx_bytes = auth_xport_recv(auth_conn->xport_hdl, buffer, len, 30000);
 
@@ -551,7 +556,7 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
     }
 
     return 0;
-#endif
+#endif  /* USE_DTLS */
 }
 
 
@@ -626,8 +631,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_tls_c
     mbedtls_ssl_conf_max_frag_len(&mbed_ctx->conf, MBEDTLS_SSL_MAX_FRAG_LEN_512);
 
     /* Set the DTLS time out */
-    /* TODO: Make these KConfig vars */
-    mbedtls_ssl_conf_handshake_timeout(&mbed_ctx->conf, 10000u, 30000u);
+    mbedtls_ssl_conf_handshake_timeout(&mbed_ctx->conf, AUTH_DTLS_MIN_TIMEOUT, ATUH_DTLS_MAX_TIMEOUT);
 
     /* OPTIONAL is usually a bad choice for security, but makes interop easier
      * in this simplified example, in which the ca chain is hardcoded.
@@ -733,16 +737,15 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_tls_c
     mbedtls_ssl_set_timer_cb(&mbed_ctx->ssl, &mbed_ctx->timer, auth_tls_timing_set_delay,
                              auth_tls_timing_get_delay );
 
-
     return AUTH_SUCCESS;
 }
 
 
 /**
  * If performing a DLTS handshake
- * @param arg1
- * @param arg2
- * @param arg3
+ *
+ * @param auth_conn  The auth connection/instance.
+ *
  */
 void auth_dtls_thead(struct authenticate_conn *auth_conn)
 {
@@ -759,7 +762,6 @@ void auth_dtls_thead(struct authenticate_conn *auth_conn)
      *
      * For the client, a client hello will be sent immediately.
      */
-
     if (!auth_conn->is_client) {
 
         /**
@@ -803,7 +805,7 @@ void auth_dtls_thead(struct authenticate_conn *auth_conn)
             LOG_INF("** STARTING Handshake state: %s", auth_tls_handshake_state(mbed_ctx->ssl.state));
             // DAG DEBUG END
 
-            // do handshake step
+            /* do handshake step */
             ret = mbedtls_ssl_handshake_step(&mbed_ctx->ssl);
 
             if(ret != 0) {

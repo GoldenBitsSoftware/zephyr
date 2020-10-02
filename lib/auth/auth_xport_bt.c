@@ -21,11 +21,12 @@
 #include <logging/log.h>
 LOG_MODULE_REGISTER(auth_bt_xport, CONFIG_AUTH_LOG_LEVEL);
 
-
-#define BLE_LINK_HEADER_BYTES               (2u + 1u)  /**< two bytes for header, not sure about extra byte */
+#define AUTH_BT_WRITE_TIMEOUTMSEC       (5000u)
+#define BLE_LINK_HEADER_BYTES               (2u + 1u)  /* two bytes for header, not sure about extra byte */
 
 /**
- * Maps transport handle to a BT connection.
+ * Maps transport handle to a BT connection along with
+ * additional info used to manage BT I/O.
  */
 struct auth_xport_connection_map {
 
@@ -67,12 +68,16 @@ static struct auth_xport_connection_map bt_conn_map[CONFIG_BT_MAX_CONN];
 /**
  *  Forward declarations
  */
-int auth_xp_bt_central_tx(struct auth_xport_connection_map *bt_xp_conn, const unsigned char *buf, size_t len);
-int auth_xp_bt_peripheral_tx(struct auth_xport_connection_map *bt_xp_conn, const unsigned char *buf, size_t len);
+static int auth_xp_bt_central_tx(struct auth_xport_connection_map *bt_xp_conn, const unsigned char *buf, size_t len);
+static int auth_xp_bt_peripheral_tx(struct auth_xport_connection_map *bt_xp_conn, const unsigned char *buf, size_t len);
 
 
 /**
  * Given a BT connection, return the xport connection info.
+ *
+ * @param conn  Bluetooth Connection struct.
+ *
+ * @return Pointer to connection map for the given BT connection struct.
  */
 static struct auth_xport_connection_map *auth_xp_bt_getconn(struct bt_conn *conn)
 {
@@ -87,13 +92,15 @@ static struct auth_xport_connection_map *auth_xp_bt_getconn(struct bt_conn *conn
 
 
 #if defined(CONFIG_BT_GATT_CLIENT)
+
 /**
- *  Called by the Central (Client( to send bytes to the peripheral (server)
+ *  Called by the Central (Client) to send bytes to the peripheral (Server)
  *
- * @param xport_hdl
- * @param data
- * @param len
- * @return
+ * @param xport_hdl  Transport handle
+ * @param data       Data to send.
+ * @param len        Number of bytes to send.
+ *
+ * @return           Total bytes sent on success, on error negative error value.
  */
 static int auth_xp_bt_central_send(auth_xport_hdl_t xport_hdl, const uint8_t *data, const size_t len)
 {
@@ -112,11 +119,13 @@ static int auth_xp_bt_central_send(auth_xport_hdl_t xport_hdl, const uint8_t *da
 }
 #else
 /**
+ *  Sends data to the client via BT indication.
  *
- * @param xport_hdl
- * @param data
- * @param len
- * @return
+ * @param xport_hdl  Transport handle.
+ * @param data       Data to send.
+ * @param len        Number of bytes to send.
+ *
+ * @return           Total byte send on success, negative value on error.
  */
 static int auth_xp_bt_peripheral_send(auth_xport_hdl_t xport_hdl, const uint8_t *data, const size_t len)
 {
@@ -213,7 +222,7 @@ int auth_xp_bt_init(const auth_xport_hdl_t xport_hdl, uint32_t flags, void *xpor
 }
 
 /**
- *
+ *  @see auth_xport.h
  */
 int auth_xp_bt_deinit(const auth_xport_hdl_t xport_hdl)
 {
@@ -253,7 +262,7 @@ int auth_xp_bt_deinit(const auth_xport_hdl_t xport_hdl)
  */
 int auth_xp_bt_event(const auth_xport_hdl_t xporthdl, struct auth_xport_evt *event)
 {
-    // stub for now
+    /* stub for now */
     return AUTH_SUCCESS;
 }
 
@@ -264,7 +273,7 @@ int auth_xp_bt_get_max_payload(const auth_xport_hdl_t xporthdl)
 {
     struct auth_xport_connection_map *bt_xp_conn = auth_xport_get_context(xporthdl);
 
-    return (int)bt_gatt_get_mtu(bt_xp_conn->conn) - BLE_LINK_HEADER_BYTES;
+    return (int)(bt_gatt_get_mtu(bt_xp_conn->conn) - (uint16_t)BLE_LINK_HEADER_BYTES);
 }
 
 #if defined(CONFIG_BT_GATT_CLIENT)
@@ -282,7 +291,6 @@ u8_t auth_xp_bt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_pa
         return BT_GATT_ITER_CONTINUE;
     }
 
-    //LOG_DBG("num bytes received: %d", length);
 
     /* This happens when the connection is dropped */
     if(length == 0) {
@@ -292,13 +300,12 @@ u8_t auth_xp_bt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_pa
 
 
     // put the received bytes into the receive queue
-#ifdef CONFIG_AUTH_FRAGMENT
+#if defined(CONFIG_AUTH_FRAGMENT)
     auth_message_hdr_to_cpu((struct auth_message_frag_hdr *)data);
     int err = auth_message_assemble(bt_xp_conn->xporthdl, data, length);
 #else
     int err = auth_xport_buffer_put(bt_xp_conn->xporthdl, data, length);
 #endif
-
 
     /* if no error, need to return num of bytes handled. */
     /* Ques: What if only able to put partial bytes b/c recv queue is full? */
@@ -315,7 +322,11 @@ u8_t auth_xp_bt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_pa
 
 
 /**
+ * Called by the Bluetooth stack after sending BLE data.
  *
+ * @param conn   The Bluetooth connection.
+ * @param err    ATT error code, 0 is success.
+ * @param params Pointer to write params used when calling bt_gatt_write()
  */
 static void auth_xp_bt_central_write_cb(struct bt_conn *conn, u8_t err, struct bt_gatt_write_params *params)
 {
@@ -334,9 +345,15 @@ static void auth_xp_bt_central_write_cb(struct bt_conn *conn, u8_t err, struct b
 
 
 /**
- * @see
+ *  Used by the central to write data to the peripheral.
+ *
+ *  @param bt_xp_conn  Bluetooth transport connection map.
+ *  @param buf         Data to send.
+ *  @param len         Number of bytes to send.
+ *
+ *  @return Number of bytes sent, negative number on error.
  */
-int auth_xp_bt_central_tx(struct auth_xport_connection_map *bt_xp_conn, const unsigned char *buf, size_t len)
+static int auth_xp_bt_central_tx(struct auth_xport_connection_map *bt_xp_conn, const unsigned char *buf, size_t len)
 {
     int err = 0;
     u16_t write_count;
@@ -369,9 +386,8 @@ int auth_xp_bt_central_tx(struct auth_xport_connection_map *bt_xp_conn, const un
             return err;
         }
 
-
         /* wait on semaphore for write completion */
-        err = k_sem_take(&bt_xp_conn->auth_central_write_sem, K_MSEC(10000));
+        err = k_sem_take(&bt_xp_conn->auth_central_write_sem, K_MSEC(AUTH_BT_WRITE_TIMEOUTMSEC));
 
         if(err) {
             LOG_ERR("Failed to take semaphore, err: %d", err);
@@ -423,17 +439,21 @@ static void auth_xp_bt_peripheral_indicate(struct bt_conn *conn,
 }
 
 /**
- * @see
+ * Used by the Peripheral to send data to the central.
+ *
+ * @param bt_xp_conn  Bluetooth transport connection map.
+ * @param buf         bytes to send.
+ * @aram len          Number of bytes to send.
+ *
+ * @return On success, total number of bytes send.  On error, negative error value.
  */
-int auth_xp_bt_peripheral_tx(struct auth_xport_connection_map *bt_xp_conn, const unsigned char *buf, size_t len)
+static int auth_xp_bt_peripheral_tx(struct auth_xport_connection_map *bt_xp_conn, const unsigned char *buf, size_t len)
 {
     int ret = 0;
     int total_bytes_sent = 0;
     bool done = false;
     size_t send_cnt = 0;
 
-    /* a little too verbose */
-    /* LOG_DBG("auth_svc_peripheral_tx(), sending %d bytes.", len); */
 
     /* Set payload size if not set.  This is necessary when the MTU
      * size is negotiated after the BT connection has been established. */
@@ -487,7 +507,6 @@ int auth_xp_bt_peripheral_tx(struct auth_xport_connection_map *bt_xp_conn, const
             ret = total_bytes_sent;
             break;
         }
-
     }
 
     return ret;
@@ -500,23 +519,13 @@ int auth_xp_bt_peripheral_tx(struct auth_xport_connection_map *bt_xp_conn, const
  */
 int auth_xp_ble_event(const auth_xport_hdl_t xporthdl, struct auth_xport_evt *event)
 {
-    // stub for now
+    /* stub for now */
     return AUTH_SUCCESS;
 }
 
 
-
 /**
- *  Write callback function when Central writes to Peripheral characteristic.
- *
- * @param conn    BLE connection struct.
- * @param attr    Attribute written to.
- * @param buf     Bytes written
- * @param len     Number of bytes.
- * @param offset
- * @param flags
- *
- * @return
+ * @see auth_xport.h
  */
 ssize_t auth_xp_bt_central_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                         const void *buf, u16_t len, u16_t offset, u8_t flags)
@@ -526,7 +535,7 @@ ssize_t auth_xp_bt_central_write(struct bt_conn *conn, const struct bt_gatt_attr
     LOG_DBG("client write called, len: %d", len);
 
     /* put the received bytes into the receive queue */
-#ifdef CONFIG_AUTH_FRAGMENT
+#if defined(CONFIG_AUTH_FRAGMENT)
     auth_message_hdr_to_cpu((struct auth_message_frag_hdr *)buf);
     int err = auth_message_assemble(bt_xp_conn->xporthdl, buf, len);
 #else
@@ -542,33 +551,3 @@ ssize_t auth_xp_bt_central_write(struct bt_conn *conn, const struct bt_gatt_attr
     /* TODO: Test case where only a partial write occurred */
     return err;
 }
-
-
-
-// DAG DEBUG BEG
-void dump_attr_info(const struct bt_gatt_attr *svc_attr)
-{
-    uint16_t value_hdl;
-    const char *uuid_str;
-    do
-    {
-        uuid_str = bt_uuid_str_real(svc_attr->uuid);
-
-        if(uuid_str == NULL) {
-            uuid_str = "<unknown>";
-        }
-
-        value_hdl =  bt_gatt_attr_value_handle(svc_attr);
-
-        LOG_ERR("** attr, uuid: %s, value handle: 0x%x, handle: 0x%x", log_strdup(uuid_str), value_hdl, svc_attr->handle);
-
-        svc_attr = bt_gatt_attr_next(svc_attr);
-
-    } while(svc_attr != NULL);
-}
-
-// DAG DEBUG END
-
-
-
-

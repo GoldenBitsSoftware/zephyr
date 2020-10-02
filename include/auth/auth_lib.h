@@ -89,8 +89,7 @@ enum auth_instance_id {
 enum auth_status {
      AUTH_STATUS_STARTED,
      AUTH_STATUS_IN_PROCESS,
-     AUTH_STATUS_CANCEL_PENDING,   /* Authentication is stopping */
-     AUTH_STATUS_CANCELED,
+     AUTH_STATUS_CANCELED,    /* authentication has been cancled */
      AUTH_STATUS_FAILED,      /* an internal failure of some type */
      AUTH_STATUS_AUTHENTICATION_FAILED,
      AUTH_STATUS_SUCCESSFUL
@@ -118,8 +117,7 @@ typedef void (*auth_status_cb_t)(struct authenticate_conn *auth_conn, enum auth_
  *         to have multiple concurrent authentication instances. For example if
  *         a device is acting as a Central and Peripheral concurrently.
  */
-struct authenticate_conn
-{
+struct authenticate_conn {
     bool is_client;  /* True if client */
 
     /* lower transport opaque handle */
