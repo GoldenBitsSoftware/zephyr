@@ -193,7 +193,7 @@ static bool auth_client_send_challenge(struct authenticate_conn *auth_conn, cons
 }
 
 /**
- * Recevies and processes the challenge response from the server.
+ * Receives and processes the challenge response from the server.
  *
  * @param auth_conn     Authentication connection structure.
  * @param random_chal   32 byte challenge sent to the server.
@@ -223,7 +223,7 @@ static bool auth_client_recv_chal_resp(struct authenticate_conn *auth_conn, cons
             return false;
         }
 
-        /* timed out, try to read agian */
+        /* timed out, try to read again */
         if(numbytes == -EAGAIN) {
             continue;
         }
@@ -487,7 +487,8 @@ static int auth_chalresp_client(struct authenticate_conn *auth_conn)
     enum auth_status status;
 
     /* generate random number as challenge */
-    sys_rand_get(random_chal, sizeof(random_chal));
+    sys_csrand_get(random_chal, sizeof(random_chal));
+
 
     if (!auth_client_send_challenge(auth_conn, random_chal)) {
         auth_lib_set_status(auth_conn, AUTH_STATUS_FAILED);
@@ -554,7 +555,7 @@ static int auth_chalresp_server(struct authenticate_conn *auth_conn)
     uint8_t random_chal[AUTH_CHALLENGE_LEN];
 
     /* generate random number as challenge */
-    sys_rand_get(random_chal, sizeof(random_chal));
+    sys_csrand_get(random_chal, sizeof(random_chal));
 
     /* Wait for challenge from the Central */
     if(!auth_server_recv_challenge(auth_conn, random_chal)) {

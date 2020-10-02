@@ -125,7 +125,6 @@ static void auth_free_mbedcontext(struct mbed_tls_context *mbed_ctx)
     mbedtls_ssl_free(&mbed_ctx->ssl);
     mbedtls_ssl_config_free(&mbed_ctx->conf);
     mbedtls_ctr_drbg_free(&mbed_ctx->ctr_drbg);
-    //mbedtls_entropy_free(&mbed_ctx->entropy);  TODO: Investigate if needed
 }
 
 
@@ -137,8 +136,6 @@ static void auth_init_context(struct mbed_tls_context *mbed_ctx)
     mbedtls_x509_crt_init(&mbed_ctx->device_cert);
     mbedtls_pk_init(&mbed_ctx->device_private_key);
     mbedtls_ssl_cookie_init(&mbed_ctx->cookie_ctx);
-
-    //mbedtls_entropy_init(&mbed_ctx->entropy);  TODO: Investigate if needed.
     mbedtls_ctr_drbg_init(&mbed_ctx->ctr_drbg);
 }
 
@@ -296,13 +293,6 @@ static int auth_tls_timing_get_delay( void *data )
     return 0;
 }
 
-static int auth_tls_drbg_random(void *ctx, unsigned char *rand_buf, size_t number)
-{
-    // TODO: Use sys_csrand_get() instead?
-    sys_rand_get(rand_buf, number);
-
-    return 0;
-}
 
 
 /**
@@ -579,7 +569,7 @@ static int auth_tls_set_cookie(struct authenticate_conn *auth_conn)
         return AUTH_ERROR_INVALID_PARAM;
     }
 
-    sys_rand_get(cookie_val, sizeof(cookie_val));
+    sys_csrand_get(cookie_val, sizeof(cookie_val));
 
     ret = mbedtls_ssl_set_client_transport_id(&mbed_ctx->ssl, cookie_val, sizeof(cookie_val));
 
@@ -703,7 +693,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_tls_c
     }
 
     /* setup call to Zephyr random API */
-    mbedtls_ssl_conf_rng(&mbed_ctx->conf, auth_tls_drbg_random, &mbed_ctx->ctr_drbg);
+    mbedtls_ssl_conf_rng(&mbed_ctx->conf, mbedtls_ctr_drbg_random, &mbed_ctx->ctr_drbg);
     mbedtls_ssl_conf_dbg(&mbed_ctx->conf, auth_mbed_debug, auth_conn);
 
 #if defined(MBEDTLS_DEBUG_C)
