@@ -22,6 +22,9 @@
 #include <logging/log.h>
 #include <logging/log_ctrl.h>
 
+#if defined(CONFIG_AUTH_DTLS)
+#include "../../../certs/auth_certs.h"
+#endif
 
 LOG_MODULE_REGISTER(auth_serial_client, CONFIG_AUTH_LOG_LEVEL);
 
@@ -35,6 +38,33 @@ static struct uart_config uart_cfg = {
     .data_bits = UART_CFG_DATA_BITS_8,
     .flow_ctrl = UART_CFG_FLOW_CTRL_NONE,
 };
+
+#if defined(CONFIG_AUTH_DTLS)
+/* The Root and Intermediate Certs in a single CA chain.
+ * plus the server cert. All in PEM format.*/
+static const uint8_t auth_cert_ca_chain[] = AUTH_ROOTCA_CERT_PEM AUTH_INTERMEDIATE_CERT_PEM;
+static const uint8_t auth_dev_client_cert[] = AUTH_CLIENT_CERT_PEM;
+static const uint8_t auth_client_privatekey[] = AUTH_CLIENT_PRIVATE_KEY_PEM;
+
+static struct auth_optional_param tls_certs_param  = {
+    .param_id = AUTH_TLS_PARAM,
+    .param_body = {
+        .tls_certs = {
+            .server_ca_chain_pem = {
+                .cert = auth_cert_ca_chain,
+                .cert_size = sizeof(auth_cert_ca_chain),
+            },
+
+            .device_cert_pem = {
+                .cert = auth_dev_client_cert,
+                .cert_size = sizeof(auth_dev_client_cert),
+                .priv_key = auth_client_privatekey,
+                .priv_key_size = sizeof(auth_client_privatekey)
+            }
+        }
+    }
+};
+#endif
 
 #if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
 #define NEW_SHARED_KEY_LEN          (32u)
@@ -121,11 +151,37 @@ static int config_uart(void)
 
 void main(void)
 {
+    struct auth_optional_param *opt_parms = NULL;
+
     log_init();
 
-    /* init authentication library */
+#if defined(CONFIG_AUTH_DTLS) && defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
+#error Invalid authentication config, either DTLS or Challenge-Response, not both.
+#endif
+
+    uint32_t flags = AUTH_CONN_CLIENT;
+
+#if defined(CONFIG_AUTH_DTLS)
+	flags |= AUTH_CONN_DTLS_AUTH_METHOD;
+
+    /* set TLS certs */
+    opt_parms = &tls_certs_param;
+    printk("Using DTLS authentication method.\n");
+#endif
+
+
+#if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
+	flags |= AUTH_CONN_CHALLENGE_AUTH_METHOD;
+
+    /* Use different shared key */
+    opt_parms = &chal_resp_param;
+    printk("Using Challenge-Response authentication method.\n");
+#endif
+
+
+	/* init authentication library */
     int err = auth_lib_init(&auth_conn_serial, AUTH_INST_1_ID, auth_status_callback, NULL,
-                            &chal_resp_param,AUTH_CONN_CLIENT|AUTH_CONN_CHALLENGE_AUTH_METHOD);
+			    opt_parms, flags);
 
     /* If successful, then configure the UAR and start the
      * authentication process */
