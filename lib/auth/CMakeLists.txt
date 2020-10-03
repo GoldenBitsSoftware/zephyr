@@ -13,3 +13,9 @@ zephyr_library_sources_ifdef(CONFIG_AUTH_CHALLENGE_RESPONSE auth_chalresp.c)
 
 zephyr_library_sources_ifdef(CONFIG_AUTH_DTLS auth_tls.c)
 
+# Is this the correct way to include Mbed TLS module directory?
+if(CONFIG_MBEDTLS)
+    zephyr_include_directories($ENV{ZEPHYR_BASE}/../modules/crypto/mbedtls/include)
+    zephyr_include_directories($ENV{ZEPHYR_BASE}/../modules/crypto/mbedtls/configs)
+endif()
+
