@@ -157,12 +157,6 @@ static void connected(struct bt_conn *conn, u8_t err)
             return;
         }
 
-	// DAG DEBUG BEG
-	// Need to figure out how the peripheral get's notified
-	// of the MTU size change
-	printk("*** MTU size is: %d\n", bt_gatt_get_mtu(conn));
-	// DAG DEBUG END
-
         is_connected = true;
 
         /* send connection event to BT transport */
@@ -170,7 +164,7 @@ static void connected(struct bt_conn *conn, u8_t err)
         auth_xport_event(auth_conn.xport_hdl, &conn_evt);
 
         /* Start authentication */
-        int ret = auth_lib_start(&auth_conn);
+        ret = auth_lib_start(&auth_conn);
 
         if(ret) {
             printk("Failed to start authentication, err: %d\n", ret);

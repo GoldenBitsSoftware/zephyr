@@ -339,8 +339,6 @@ static void connected(struct bt_conn *conn, u8_t conn_err)
             LOG_ERR("Discover failed(err %d)", err);
             return;
         }
-
-        central_auth_conn.conn = conn;
     }
 }
 
@@ -579,8 +577,6 @@ void main(void)
     opt_parms = &chal_resp_param;
     printk("Using Challenge-Response authentication method.\n");
 #endif
-
-
 
 
     err = auth_lib_init(&central_auth_conn, AUTH_INST_1_ID, auth_status, NULL, opt_parms, flags);
