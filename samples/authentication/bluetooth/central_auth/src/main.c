@@ -558,7 +558,7 @@ void main(void)
     uint32_t flags = AUTH_CONN_CLIENT;
 
 #if defined(CONFIG_AUTH_DTLS) && defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
-#error Invalid authenticaiton config, either DTLS or Challenge-Response, not both.
+#error Invalid authentication config, either DTLS or Challenge-Response, not both.
 #endif
 
 #if defined(CONFIG_AUTH_DTLS)
