@@ -36,21 +36,41 @@ static struct uart_config uart_cfg = {
     .flow_ctrl = UART_CFG_FLOW_CTRL_NONE,
 };
 
+#if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
+#define NEW_SHARED_KEY_LEN          (32u)
+
+/* Use a different key than default */
+static uint8_t chal_resp_sharedkey[NEW_SHARED_KEY_LEN] = {
+    0x21, 0x8e, 0x37, 0x42, 0x1e, 0xe1, 0x2a, 0x22, 0x7c, 0x4b, 0x3f, 0x3f, 0x07, 0x5e, 0x8a, 0xd8,
+    0x24, 0xdf, 0xca, 0xf4, 0x04, 0xd0, 0x3e, 0x22, 0x61, 0x9f, 0x24, 0xa3, 0xc7, 0xf6, 0x5d, 0x66
+};
+
+
+static struct auth_optional_param chal_resp_param  = {
+    .param_id = AUTH_CHALRESP_PARAM,
+        .param_body = {
+            .chal_resp = {
+                .shared_key = chal_resp_sharedkey,
+            },
+        }
+};
+#endif
+
 
 /* Authentication connection info */
 static struct authenticate_conn auth_conn_serial;
 
 
-void auth_status_callback(struct authenticate_conn *auth_conn, enum auth_status status, void *context)
+void auth_status_callback(struct authenticate_conn *auth_conn, enum auth_instance_id instance,
+                          enum auth_status status, void *context)
 {
-    LOG_INF("Authentiction status: %s", auth_lib_getstatus_str(status));
+    LOG_INF("Authentication instance (%d) status: %s", instance, auth_lib_getstatus_str(status));
 
     if((status == AUTH_STATUS_FAILED) || (status == AUTH_STATUS_AUTHENTICATION_FAILED) ||
        (status == AUTH_STATUS_SUCCESSFUL))
     {
         /* Authentication has finished */
         auth_lib_deinit(auth_conn);
-
     }
 }
 
@@ -88,7 +108,6 @@ static int config_uart(void)
 
     /* If successful,then init lower transport layer. */
     xp_params.uart_dev = uart_dev;
-    //xp_params.payload_size = 2048;
 
     err = auth_xport_init(&auth_conn_serial.xport_hdl,  0, &xp_params);
 
@@ -105,8 +124,8 @@ void main(void)
     log_init();
 
     /* init authentication library */
-    int err = auth_lib_init(&auth_conn_serial, auth_status_callback, NULL,
-                                  AUTH_CONN_CLIENT|AUTH_CONN_CHALLENGE_AUTH_METHOD);
+    int err = auth_lib_init(&auth_conn_serial, AUTH_INST_1_ID, auth_status_callback, NULL,
+                            &chal_resp_param,AUTH_CONN_CLIENT|AUTH_CONN_CHALLENGE_AUTH_METHOD);
 
     /* If successful, then configure the UAR and start the
      * authentication process */
