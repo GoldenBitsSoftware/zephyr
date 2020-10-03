@@ -14,7 +14,6 @@
 #include <init.h>
 
 
-
 #if defined(CONFIG_MBEDTLS)
 #if !defined(CONFIG_MBEDTLS_CFG_FILE)
 #include "mbedtls/config.h"
@@ -22,6 +21,7 @@
 #include CONFIG_MBEDTLS_CFG_FILE
 #endif
 #endif /* CONFIG_MBEDTLS_CFG_FILE */
+
 
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/net_sockets.h>
@@ -554,13 +554,14 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
 /**
  * Set the DTLS cookie.
  *
- * @param auth_conn   Pointer to auth connectoin
+ * @param auth_conn   Pointer to auth connection
  *
  * @return 0 on success, else error code.
  */
 static int auth_tls_set_cookie(struct authenticate_conn *auth_conn)
 {
-    uint8_t cookie_val[DTLS_COOKIE_LEN]
+    int ret;
+    uint8_t cookie_val[DTLS_COOKIE_LEN];
     struct mbed_tls_context *mbed_ctx = (struct mbed_tls_context *)auth_conn->internal_obj;
 
     /* should not be NULL!!  */
