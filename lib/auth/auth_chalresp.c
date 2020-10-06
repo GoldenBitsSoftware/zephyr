@@ -487,7 +487,7 @@ static int auth_chalresp_client(struct authenticate_conn *auth_conn)
     enum auth_status status;
 
     /* generate random number as challenge */
-    sys_csrand_get(random_chal, sizeof(random_chal));
+    sys_rand_get(random_chal, sizeof(random_chal));
 
 
     if (!auth_client_send_challenge(auth_conn, random_chal)) {
@@ -555,7 +555,7 @@ static int auth_chalresp_server(struct authenticate_conn *auth_conn)
     uint8_t random_chal[AUTH_CHALLENGE_LEN];
 
     /* generate random number as challenge */
-    sys_csrand_get(random_chal, sizeof(random_chal));
+    sys_rand_get(random_chal, sizeof(random_chal));
 
     /* Wait for challenge from the Central */
     if(!auth_server_recv_challenge(auth_conn, random_chal)) {

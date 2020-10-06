@@ -570,7 +570,7 @@ static int auth_tls_set_cookie(struct authenticate_conn *auth_conn)
         return AUTH_ERROR_INVALID_PARAM;
     }
 
-    sys_csrand_get(cookie_val, sizeof(cookie_val));
+    sys_rand_get(cookie_val, sizeof(cookie_val));
 
     ret = mbedtls_ssl_set_client_transport_id(&mbed_ctx->ssl, cookie_val, sizeof(cookie_val));
 
