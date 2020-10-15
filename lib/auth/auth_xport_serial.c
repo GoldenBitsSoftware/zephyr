@@ -229,13 +229,17 @@ static void auth_xp_serial_recv_thrd(void *arg1, void *arg2, void *arg3)
         struct serial_msgfrag_recv frag_msg;
 
         if(k_msgq_get(&xp_inst->frag_rx_queue, &frag_msg, K_FOREVER) == 0) {
-            auth_message_assemble(xp_inst->xport_hdl, frag_msg.rx_buf + frag_msg.frag_offset, frag_msg.frag_len);
+            auth_message_assemble(xp_inst->xport_hdl, frag_msg.rx_buf + frag_msg.frag_offset,
+                                  frag_msg.frag_len);
+
+            /* free RX buffer */
+            serial_xp_free_buffer(frag_msg.rx_buf);
         }
 #else
         uint8_t rx_byte;
         if(auth_ringbuf_get_byte(&xp_inst->ringbuf, &rx_byte)) {
             auth_xport_put_recv(xp_inst->xport_hdl, &rx_byte, sizeof(rx_byte));
-        }
+                }
 #endif  /* CONFIG_AUTH_FRAGMENT */
     }
 }
@@ -435,7 +439,6 @@ static void auth_xp_serial_irq_cb(void *user_data)
         xp_inst->tx_buf = NULL;
         xp_inst->curr_tx_cnt = 0;
     }
-
 }
 
 

@@ -768,8 +768,18 @@ void auth_dtls_thead(struct authenticate_conn *auth_conn)
 
         while(bytecount == 0) {
 
+            if(auth_conn->cancel_auth) {
+                return;
+            }
+
             /* Server wait for client hello */
             bytecount = auth_xport_getnum_recvqueue_bytes_wait(auth_conn->xport_hdl, 15000u);
+
+            if(bytecount == -EAGAIN) {
+                /* simply timed out waiting for client hello, try again */
+                LOG_INF("Timeout waiting for Client Hello");
+                continue;
+            }
 
             if (bytecount < 0) {
                 LOG_ERR("Server, error when waiting for client hello, error: %d", bytecount);
