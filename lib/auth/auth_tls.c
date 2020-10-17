@@ -13,6 +13,11 @@
 #include <zephyr.h>
 #include <init.h>
 
+// DAG DEBUG BEG
+#include <logging/log.h>
+#include <logging/log_ctrl.h>
+// DAG DEBUG END
+
 
 #if defined(CONFIG_MBEDTLS)
 #if !defined(CONFIG_MBEDTLS_CFG_FILE)
@@ -42,8 +47,8 @@ LOG_MODULE_DECLARE(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 #include "auth_internal.h"
 
 
-#define MAX_MBEDTLS_CONTEXT     (2u)
-#define DTLS_COOKIE_LEN         (16u)
+#define MAX_MBEDTLS_CONTEXT         (2u)
+#define AUTH_DTLS_COOKIE_LEN        (32u)
 
 
 #define USE_DTLS  1  /* TODO: Make this a KConfig var */
@@ -78,7 +83,7 @@ struct dtls_packet_hdr {
 struct mbed_tls_context {
     bool in_use;
 
-    //mbedtls_entropy_context entropy;  TODO: Investigate if needed
+    mbedtls_entropy_context entropy;
     mbedtls_ctr_drbg_context ctr_drbg;
     mbedtls_ssl_context ssl;
     mbedtls_ssl_config conf;
@@ -91,6 +96,9 @@ struct mbed_tls_context {
 #if defined(USE_DTLS)
     /* Temp buffer used to assemble full frame when sending. */
     uint8_t temp_dtlsbuf[CONFIG_MBEDTLS_SSL_MAX_CONTENT_LEN];
+
+    /* cookie used for DTLS */
+    uint8_t cookie[AUTH_DTLS_COOKIE_LEN];
 #endif
 };
 
@@ -98,6 +106,7 @@ static struct mbed_tls_context tlscontext[MAX_MBEDTLS_CONTEXT];
 
 
 /* ===================== local functions =========================== */
+
 
 /* return NULL if unable to get context */
 static struct mbed_tls_context *auth_get_mbedcontext(void)
@@ -125,6 +134,7 @@ static void auth_free_mbedcontext(struct mbed_tls_context *mbed_ctx)
     mbedtls_ssl_free(&mbed_ctx->ssl);
     mbedtls_ssl_config_free(&mbed_ctx->conf);
     mbedtls_ctr_drbg_free(&mbed_ctx->ctr_drbg);
+    mbedtls_entropy_free(&mbed_ctx->entropy);
 }
 
 
@@ -137,6 +147,11 @@ static void auth_init_context(struct mbed_tls_context *mbed_ctx)
     mbedtls_pk_init(&mbed_ctx->device_private_key);
     mbedtls_ssl_cookie_init(&mbed_ctx->cookie_ctx);
     mbedtls_ctr_drbg_init(&mbed_ctx->ctr_drbg);
+    mbedtls_entropy_init(&mbed_ctx->entropy);
+
+#if defined(USE_DTLS)
+    sys_rand_get(mbed_ctx->cookie, sizeof(mbed_ctx->cookie));
+#endif
 }
 
 /**
@@ -561,7 +576,6 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
 static int auth_tls_set_cookie(struct authenticate_conn *auth_conn)
 {
     int ret;
-    uint8_t cookie_val[DTLS_COOKIE_LEN];
     struct mbed_tls_context *mbed_ctx = (struct mbed_tls_context *)auth_conn->internal_obj;
 
     /* should not be NULL!!  */
@@ -570,12 +584,28 @@ static int auth_tls_set_cookie(struct authenticate_conn *auth_conn)
         return AUTH_ERROR_INVALID_PARAM;
     }
 
-    sys_rand_get(cookie_val, sizeof(cookie_val));
-
-    ret = mbedtls_ssl_set_client_transport_id(&mbed_ctx->ssl, cookie_val, sizeof(cookie_val));
+    ret = mbedtls_ssl_set_client_transport_id(&mbed_ctx->ssl, mbed_ctx->cookie,
+                                              sizeof(mbed_ctx->cookie));
 
     return ret;
 }
+
+/**
+ * Psudo random generator for Mbed
+ *
+ * @param ctx
+ * @param out_ran
++* @param out_len
+ */
+static int auth_tls_entropy(void *data, unsigned char *output, size_t len,
+                            size_t *olen)
+{
+    sys_rand_get(output, len);
+    *olen = len;
+
+    return 0;
+}
+
 
 
 /* ================= external/internal funcs ==================== */
@@ -600,6 +630,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_tls_c
 
     /* Init mbed context */
     auth_init_context(mbed_ctx);
+
 
     /* Save MBED tls context as internal object. The intent of using a void
      * 'internal_obj' is to provide a var in the struct authentication_conn to
@@ -693,8 +724,14 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_tls_c
         return AUTH_ERROR_DTLS_INIT_FAILED;
     }
 
+    mbedtls_entropy_add_source(&mbed_ctx->entropy, auth_tls_entropy, NULL,
+                                     32,  MBEDTLS_ENTROPY_SOURCE_STRONG);
+
+    mbedtls_ctr_drbg_seed(&mbed_ctx->ctr_drbg, mbedtls_entropy_func, &mbed_ctx->entropy, NULL, 0);
+
     /* setup call to Zephyr random API */
     mbedtls_ssl_conf_rng(&mbed_ctx->conf, mbedtls_ctr_drbg_random, &mbed_ctx->ctr_drbg);
+
     mbedtls_ssl_conf_dbg(&mbed_ctx->conf, auth_mbed_debug, auth_conn);
 
 #if defined(MBEDTLS_DEBUG_C)
@@ -702,6 +739,8 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_tls_c
 #endif
 
     if (!auth_conn->is_client) {
+
+        auth_tls_set_cookie(auth_conn);
 
         ret = mbedtls_ssl_cookie_setup(&mbed_ctx->cookie_ctx, mbedtls_ctr_drbg_random, &mbed_ctx->ctr_drbg);
 
@@ -711,8 +750,12 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_tls_c
             return AUTH_ERROR_DTLS_INIT_FAILED;
         }
 
+// DAG DEBUG BEG
+        //mbedtls_ssl_conf_dtls_cookies(&mbed_ctx->conf, auth_ssl_cookie_write, auth_ssl_cookie_check,
+         //                             &mbed_ctx->cookie_ctx);
         mbedtls_ssl_conf_dtls_cookies(&mbed_ctx->conf, mbedtls_ssl_cookie_write, mbedtls_ssl_cookie_check,
-                                      &mbed_ctx->cookie_ctx);
+                                     &mbed_ctx->cookie_ctx);
+// DAG DEBUG END
     }
 
 
@@ -731,9 +774,23 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_tls_c
     return AUTH_SUCCESS;
 }
 
+// DAG DEBUG BEG
+static void process_log_msgs(void)
+{
+    while(log_process(false)) {
+        ;  /* intentionally empty statement */
+    }
+
+    /* Let the handshake thread run */
+    k_yield();
+}
+
+
+// DAG DEBUG END
+
 
 /**
- * If performing a DLTS handshake
+ * If performing a DTLS handshake
  *
  * @param auth_conn  The auth connection/instance.
  *
@@ -800,8 +857,7 @@ void auth_dtls_thead(struct authenticate_conn *auth_conn)
     do {
 
         while(mbed_ctx->ssl.state != MBEDTLS_SSL_HANDSHAKE_OVER &&
-              !auth_conn->cancel_auth)
-        {
+              !auth_conn->cancel_auth) {
             // DAG DEBUG BEG
             LOG_INF("** STARTING Handshake state: %s", auth_tls_handshake_state(mbed_ctx->ssl.state));
             // DAG DEBUG END
@@ -812,6 +868,10 @@ void auth_dtls_thead(struct authenticate_conn *auth_conn)
             if(ret != 0) {
                 break;
             }
+
+// DAG DEBUG BEG
+            process_log_msgs();
+// DAG DEBUG END
         }
 
 
@@ -825,9 +885,9 @@ void auth_dtls_thead(struct authenticate_conn *auth_conn)
             /* restart handshake to process client cookie */
             LOG_INF("Restarting handshake, need client cookie.");
 
+            /* reset session and cookie info */
             mbedtls_ssl_session_reset(&mbed_ctx->ssl);
 
-            /* reset cookie info */
             ret = auth_tls_set_cookie(auth_conn);
 
             if(ret) {
@@ -836,6 +896,7 @@ void auth_dtls_thead(struct authenticate_conn *auth_conn)
             } else {
                 ret = MBEDTLS_ERR_SSL_WANT_READ;
             }
+
         }
 
         if(auth_conn->cancel_auth) {
