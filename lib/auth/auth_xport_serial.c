@@ -24,7 +24,7 @@
 LOG_MODULE_REGISTER(auth_serial_xport, CONFIG_AUTH_LOG_LEVEL);
 
 
-#define SERIAL_LINK_MTU                     (512u)
+#define SERIAL_LINK_MTU                     (600u)
 #define SERIAL_XP_BUFFER_LEN                SERIAL_LINK_MTU
 #define NUM_BUFFERS                         (6u)
 #define MSGQ_RX_FRAG_COUNT                  (4)     /* Length of message queue for receiving message
@@ -33,6 +33,8 @@ LOG_MODULE_REGISTER(auth_serial_xport, CONFIG_AUTH_LOG_LEVEL);
 #define MAX_SERIAL_INSTANCES                (3u)
 #define SERIAL_XP_RECV_THRD_PRIORITY        (0)
 #define SERIAL_XP_RECV_STACK_SIZE           (4096)
+
+#define SERIAL_TX_WAIT_MSEC                 (1000u)
 
 
 struct serial_msgfrag_recv {
@@ -54,9 +56,11 @@ struct serial_xp_instance
     uint16_t curr_tx_cnt;  /* current tx send count */
 
     /* Receive thread vars */
-    k_tid_t seiral_xp_tid;
+    k_tid_t serial_xp_tid;
     struct k_thread serial_xp_thrd_data;
 
+    /* Semaphore for TX */
+    struct k_sem tx_sem;
 
 #if defined(CONFIG_AUTH_FRAGMENT)
     /* current rx buffer */
@@ -255,7 +259,7 @@ static void auth_xp_serial_start_recvthread(struct serial_xp_instance *serial_in
     /* add to linked list of serial xports */
 
     // TODO:  Get thread stack from stack pool?
-    serial_inst->seiral_xp_tid = k_thread_create(&serial_inst->serial_xp_thrd_data, serial_recv_thread_stack_area_1,
+    serial_inst->serial_xp_tid = k_thread_create(&serial_inst->serial_xp_thrd_data, serial_recv_thread_stack_area_1,
                                           K_THREAD_STACK_SIZEOF(serial_recv_thread_stack_area_1),
                                           auth_xp_serial_recv_thrd, serial_inst, NULL, NULL,
                                           SERIAL_XP_RECV_THRD_PRIORITY,
@@ -282,6 +286,9 @@ static void auth_xp_serial_irq_recv_fragment(struct serial_xp_instance *xp_inst)
     uint16_t frag_bytes;
     uint16_t remaining_buffer_bytes;
     struct serial_msgfrag_recv frag_msg;
+    // DAG DEBUG BEG
+    static int dag_total_cnt;
+    // DAG DEBUG END
 
     if(xp_inst->rx_buf == NULL) {
         /* try to allocate buffer */
@@ -299,10 +306,18 @@ static void auth_xp_serial_irq_recv_fragment(struct serial_xp_instance *xp_inst)
 
     xp_inst->curr_rx_cnt += num_bytes;
 
+    // DAG DEBUG BEG
+    dag_total_cnt += num_bytes;
+    // DAG DEBUG END
+
 
     /* Is there a full frame? */
     if(auth_message_get_fragment(xp_inst->rx_buf, xp_inst->curr_rx_cnt,
                                 &frag_beg_offset, &frag_bytes)) {
+
+        // DAG DEBUG BEG
+        LOG_ERR("** recv total bytes: %d", dag_total_cnt);
+        // DAG DEBUG END
 
         /* A full message fragment is present in the input buffer starting
          * at frag_beg_offset and frag_bytes in length.  It's possible to
@@ -438,6 +453,9 @@ static void auth_xp_serial_irq_cb(void *user_data)
         serial_xp_free_buffer(xp_inst->tx_buf);
         xp_inst->tx_buf = NULL;
         xp_inst->curr_tx_cnt = 0;
+
+        /* signal TX complete */
+        k_sem_give(&xp_inst->tx_sem);
     }
 }
 
@@ -481,12 +499,23 @@ static int auth_xp_serial_send(auth_xport_hdl_t xport_hdl, const uint8_t *data, 
     serial_inst->tx_bytes = len;
     serial_inst->curr_tx_cnt = 0;
 
+    // DAG DEBUG BEG
+    LOG_ERR("Send %d bytes", len);
+    // DAG DEBUG END
+
     /* should kick of an interrupt */
     uart_irq_tx_enable(serial_inst->uart_dev);
 
     LOG_INF("Started TX operation");
 
-    return len;
+    /* Wait on semaphore for TX to complete */
+    int ret = k_sem_take(&serial_inst->tx_sem, K_MSEC(SERIAL_TX_WAIT_MSEC));
+
+    if(ret) {
+        return ret;
+    }
+
+    return (int)len;
 }
 
 
@@ -524,6 +553,9 @@ int auth_xp_serial_init(const auth_xport_hdl_t xport_hdl, uint32_t flags, void *
     auth_xport_set_context(xport_hdl, serial_inst);
 
     auth_xport_set_sendfunc(xport_hdl, auth_xp_serial_send);
+
+    /* Init semaphore used to wait for TX to complete. */
+    k_sem_init(&serial_inst->tx_sem, 0, 1);
 
     /* reset tx vars */
     serial_inst->tx_buf = NULL;
