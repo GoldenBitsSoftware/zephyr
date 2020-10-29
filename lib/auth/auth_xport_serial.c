@@ -24,24 +24,19 @@
 LOG_MODULE_REGISTER(auth_serial_xport, CONFIG_AUTH_LOG_LEVEL);
 
 
-#define SERIAL_LINK_MTU                     (600u)
+#define SERIAL_LINK_MTU                     (200u)
 #define SERIAL_XP_BUFFER_LEN                SERIAL_LINK_MTU
 #define NUM_BUFFERS                         (6u)
-#define MSGQ_RX_FRAG_COUNT                  (4)     /* Length of message queue for receiving message
-                                                    * fragments from ISR */
+#define RX_EVENT_MSGQ_COUNT                 (10u)     /* Number of events on the msg queue. NOTE: This
+                                                         queue is shared by all instances. */
 
 #define MAX_SERIAL_INSTANCES                (3u)
 #define SERIAL_XP_RECV_THRD_PRIORITY        (0)
-#define SERIAL_XP_RECV_STACK_SIZE           (4096)
+#define SERIAL_XP_RECV_STACK_SIZE           (1024)
 
-#define SERIAL_TX_WAIT_MSEC                 (1000u)
+#define SERIAL_TX_WAIT_MSEC                 (1500u)
 
 
-struct serial_msgfrag_recv {
-    uint8_t *rx_buf;
-    uint16_t frag_offset;
-    uint16_t frag_len;
-};
 
 /* Serial transport instance */
 struct serial_xp_instance
@@ -66,10 +61,6 @@ struct serial_xp_instance
     /* current rx buffer */
     uint8_t *rx_buf;
     uint16_t curr_rx_cnt;
-
-    /* message queue used to send fragment to recv thread */
-    struct k_msgq frag_rx_queue;
-    uint8_t __aligned(4) frag_rx_queue_buf[sizeof(struct serial_msgfrag_recv) * MSGQ_RX_FRAG_COUNT];
 #else
     /* IO is handled as stream of bytes with no message boundary */
     struct auth_ringbuf ring_buf;
@@ -85,15 +76,51 @@ struct serial_xp_buffer {
     uint8_t buffer[SERIAL_XP_BUFFER_LEN];
 };
 
+/**
+ * Used to pass bytes to the receive thread from the
+ * UART interrupt routine.
+ */
+struct serial_recv_event {
+    struct serial_xp_instance *serial_inst;
+
+#if defined(CONFIG_AUTH_FRAGMENT)
+    uint8_t *rx_buf;
+    uint16_t frag_offset;
+    uint16_t frag_len;
+
+    /* struct needs to be multiple of 4 bytes to work with the
+     * message queue, add padding here */
+    uint8_t pad[4];
+#endif
+};
+
+
+/**
+ * Receive thread.  Handles bytes received from the ISR and forwards to
+ * the receive queue.
+ */
+static void auth_xp_serial_recv_thrd(void *arg1, void *arg2, void *arg3);
+
 
 static struct serial_xp_instance serial_xp_inst[CONFIG_NUM_AUTH_INSTANCES];
 
+/**
+ * Receive event message queue
+ */
+K_MSGQ_DEFINE(recv_event_queue, sizeof(struct serial_recv_event), RX_EVENT_MSGQ_COUNT, 4);
 
-K_THREAD_STACK_DEFINE(serial_recv_thread_stack_area_1, SERIAL_XP_RECV_STACK_SIZE);
+K_THREAD_STACK_DEFINE(serial_recv_thread_stack_area, SERIAL_XP_RECV_STACK_SIZE);
+
+// Defining the thread here causes a crash for some unknown reason.
+// need to debug furtehr.
+//K_THREAD_DEFINE(serial_recv, SERIAL_XP_RECV_STACK_SIZE, auth_xp_serial_recv_thrd, NULL, NULL, NULL,
+//SERIAL_XP_RECV_THRD_PRIORITY, 0, 0);
 
 /* Atomic bits to determine if a buffer is in use.  If bit is set
  * buffer is in use. */
 ATOMIC_DEFINE(buffer_in_use, NUM_BUFFERS);
+
+
 
 /**
  * Serial buffer pool, used across all serial instances.
@@ -128,6 +155,25 @@ static struct serial_xp_buffer *serial_xp_buffer_info(const uint8_t *buf)
     return xp_buf;
 }
 
+
+
+/**
+ * Serial transport receive...
+ * @param serial_inst
+ */
+
+static void auth_xp_serial_start_recvthread(void)
+{
+    static struct k_thread rx_thrd;
+    
+    // TODO:  Get thread stack from stack pool?
+    k_thread_create(&rx_thrd, serial_recv_thread_stack_area,
+                     K_THREAD_STACK_SIZEOF(serial_recv_thread_stack_area),
+                     auth_xp_serial_recv_thrd, NULL, NULL, NULL,
+                     SERIAL_XP_RECV_THRD_PRIORITY,
+                     0,  // options
+                     K_NO_WAIT);
+}
 
 /**
  * Gets a free buffer.
@@ -223,50 +269,43 @@ static void auth_xp_serial_free_instance(struct serial_xp_instance *serial_inst)
     }
 }
 
+
+/**
+ * UART receive thread. Handles bytes from the UART interrupt routine
+ * and forwards to the common transport receive queue.
+ */
 static void auth_xp_serial_recv_thrd(void *arg1, void *arg2, void *arg3)
 {
-    struct serial_xp_instance *xp_inst = (struct serial_xp_instance *)arg1;
+    struct serial_recv_event recv_event;
+
+    /* unused */
+    (void)arg1;
+    (void)arg2;
+    (void)arg3;
 
     while (true) {
 
-#if defined(CONFIG_AUTH_FRAGMENT)
-        struct serial_msgfrag_recv frag_msg;
+        if(k_msgq_get(&recv_event_queue, &recv_event, K_FOREVER) == 0) {
 
-        if(k_msgq_get(&xp_inst->frag_rx_queue, &frag_msg, K_FOREVER) == 0) {
-            auth_message_assemble(xp_inst->xport_hdl, frag_msg.rx_buf + frag_msg.frag_offset,
-                                  frag_msg.frag_len);
+#if defined(CONFIG_AUTH_FRAGMENT)
+            auth_message_assemble(recv_event.serial_inst->xport_hdl,
+                                  recv_event.rx_buf + recv_event.frag_offset,
+                                  recv_event.frag_len);
 
             /* free RX buffer */
-            serial_xp_free_buffer(frag_msg.rx_buf);
-        }
+            serial_xp_free_buffer(recv_event.rx_buf);
 #else
-        uint8_t rx_byte;
-        if(auth_ringbuf_get_byte(&xp_inst->ringbuf, &rx_byte)) {
-            auth_xport_put_recv(xp_inst->xport_hdl, &rx_byte, sizeof(rx_byte));
-                }
-#endif  /* CONFIG_AUTH_FRAGMENT */
-    }
-}
+            uint8_t rx_byte;
+            while(auth_ringbuf_get_byte(&recv_event.serial_inst->ringbuf, &rx_byte, K_NO_WAIT ) {
+                auth_xport_put_recv(recv_event.serial_inst->xport_hdl, &rx_byte, sizeof(rx_byte));
+            }
+#endif
+        }
 
-
-/**
- * Serial transport receive...
- * @param serial_inst
- */
-static void auth_xp_serial_start_recvthread(struct serial_xp_instance *serial_inst)
-{
-
-    /* add to linked list of serial xports */
-
-    // TODO:  Get thread stack from stack pool?
-    serial_inst->serial_xp_tid = k_thread_create(&serial_inst->serial_xp_thrd_data, serial_recv_thread_stack_area_1,
-                                          K_THREAD_STACK_SIZEOF(serial_recv_thread_stack_area_1),
-                                          auth_xp_serial_recv_thrd, serial_inst, NULL, NULL,
-                                          SERIAL_XP_RECV_THRD_PRIORITY,
-                                          0,  // options
-                                          K_NO_WAIT);
+    }  /* end while() */
 
 }
+
 
 /**
  * Reads bytes from UART into a rx buffer.  When enough bytes have accumulated to fill a
@@ -285,10 +324,7 @@ static void auth_xp_serial_irq_recv_fragment(struct serial_xp_instance *xp_inst)
     uint16_t frag_beg_offset;
     uint16_t frag_bytes;
     uint16_t remaining_buffer_bytes;
-    struct serial_msgfrag_recv frag_msg;
-    // DAG DEBUG BEG
-    static int dag_total_cnt;
-    // DAG DEBUG END
+    struct serial_recv_event recv_event;
 
     if(xp_inst->rx_buf == NULL) {
         /* try to allocate buffer */
@@ -306,18 +342,9 @@ static void auth_xp_serial_irq_recv_fragment(struct serial_xp_instance *xp_inst)
 
     xp_inst->curr_rx_cnt += num_bytes;
 
-    // DAG DEBUG BEG
-    dag_total_cnt += num_bytes;
-    // DAG DEBUG END
-
-
     /* Is there a full frame? */
     if(auth_message_get_fragment(xp_inst->rx_buf, xp_inst->curr_rx_cnt,
                                 &frag_beg_offset, &frag_bytes)) {
-
-        // DAG DEBUG BEG
-        LOG_ERR("** recv total bytes: %d", dag_total_cnt);
-        // DAG DEBUG END
 
         /* A full message fragment is present in the input buffer starting
          * at frag_beg_offset and frag_bytes in length.  It's possible to
@@ -341,14 +368,17 @@ static void auth_xp_serial_irq_recv_fragment(struct serial_xp_instance *xp_inst)
         }
 
 
-        frag_msg.rx_buf = xp_inst->rx_buf;
-        frag_msg.frag_offset = frag_beg_offset;
-        frag_msg.frag_len = frag_bytes;
+        /* Setup receive event */
+        recv_event.rx_buf = xp_inst->rx_buf;
+        recv_event.frag_offset = frag_beg_offset;
+        recv_event.frag_len = frag_bytes;
+        recv_event.serial_inst = xp_inst;
 
         /* send fragment to receive thread via message queue */
-        while(k_msgq_put(&xp_inst->frag_rx_queue, &frag_msg, K_NO_WAIT) != 0) {
-              /* an error occurred, purge message queue */
-              k_msgq_purge(&xp_inst->frag_rx_queue);
+        if(k_msgq_put(&recv_event_queue, &recv_event, K_NO_WAIT) != 0) {
+              /* an error occurred, free buffer */
+            serial_xp_free_buffer(recv_event.rx_buf);
+            LOG_ERR("Failed to queue recv event, dropping recv bytes.");
         }
 
         /* now setup new RX fragment */
@@ -395,18 +425,17 @@ static void auth_xp_serial_irq_cb(void *user_data)
     /* did an error happen */
     rx_stop = uart_err_check(uart_dev);
 
-    if(rx_stop != 0){
+    if(rx_stop != 0) {
         /* handle error */
-        //UART_ERROR_OVERRUN
-        //UART_ERROR_PARITY
-       // UART_ERROR_FRAMING
-        //UART_ERROR_BREAK
+        /*  UART_ERROR_OVERRUN, UART_ERROR_PARITY
+         *  UART_ERROR_FRAMING, UART_ERROR_BREAK
+         */
         LOG_ERR("UART error: %d", rx_stop);
         return;
     }
 
     /* read any chars first */
-    while(uart_irq_rx_ready(uart_dev) ) {
+    while(uart_irq_rx_ready(uart_dev)) {
 
 #if defined(CONFIG_AUTH_FRAGMENT)
         auth_xp_serial_irq_recv_fragment(xp_inst);
@@ -417,6 +446,16 @@ static void auth_xp_serial_irq_cb(void *user_data)
         for (cnt = 0; cnt < num_bytes; cnt++) {
             auth_ringbuf_put_byte(&xp_inst->ring_buf, temp_byte_rx[cnt]);
         }
+
+        /* put recv message on queue for recv */
+        struct serial_recv_event recv_event = { .serial_inst = xp_inst };
+
+        int ret = k_msgq_put(&recv_event_queue, &recv_event, K_NO_WAIT);
+
+        if(ret) {
+            LOG_ERR("Failed to queue receive message, err: %d", ret);
+        }
+
 #endif  /* CONFIG_AUTH_FRAGMENT */
     }
 
@@ -441,7 +480,7 @@ static void auth_xp_serial_irq_cb(void *user_data)
 
         total_cnt += num_bytes;
 
-        /* if not more data to send, then break */
+        /* if no more data to send, then break */
         if(xp_inst->tx_bytes == 0) {
             LOG_INF("Sent tx buffer, bytes: %d.", xp_inst->curr_tx_cnt);
             break;
@@ -462,6 +501,7 @@ static void auth_xp_serial_irq_cb(void *user_data)
 
 /**
  * Send bytes on the serial link.
+ * NOTE: This call will block!!! Should not call from an ISR.
  *
  * @param xport_hdl  Transport handle.
  * @param data       Bytes to send.
@@ -499,9 +539,6 @@ static int auth_xp_serial_send(auth_xport_hdl_t xport_hdl, const uint8_t *data, 
     serial_inst->tx_bytes = len;
     serial_inst->curr_tx_cnt = 0;
 
-    // DAG DEBUG BEG
-    LOG_ERR("Send %d bytes", len);
-    // DAG DEBUG END
 
     /* should kick of an interrupt */
     uart_irq_tx_enable(serial_inst->uart_dev);
@@ -533,18 +570,13 @@ int auth_xp_serial_init(const auth_xport_hdl_t xport_hdl, uint32_t flags, void *
         return AUTH_ERROR_NO_RESOURCE;
     }
 
-#if defined(CONFIG_AUTH_FRAGMENT)
-    k_msgq_init(&serial_inst->frag_rx_queue, serial_inst->frag_rx_queue_buf,
-                sizeof(struct serial_msgfrag_recv), MSGQ_RX_FRAG_COUNT);
-#else
+#if !defined(CONFIG_AUTH_FRAGMENT)
     auth_ringbuf_init(&serial_inst->ring_buf);
 #endif
 
 
     serial_inst->xport_hdl = xport_hdl;
     serial_inst->uart_dev = serial_param->uart_dev;
-
-    //  serial_param->payload_size  ??
 
     /* set serial irq callback */
     uart_irq_callback_user_data_set(serial_inst->uart_dev, auth_xp_serial_irq_cb, serial_inst);
@@ -566,7 +598,7 @@ int auth_xp_serial_init(const auth_xport_hdl_t xport_hdl, uint32_t flags, void *
     serial_inst->rx_buf = serial_xp_get_buffer(SERIAL_XP_BUFFER_LEN);
     serial_inst->curr_rx_cnt = 0;
 
-    auth_xp_serial_start_recvthread(serial_inst);
+    auth_xp_serial_start_recvthread();
 
     /* enable rx interrupts */
     uart_irq_rx_enable(serial_inst->uart_dev);
@@ -608,3 +640,6 @@ int auth_xp_serial_get_max_payload(const auth_xport_hdl_t xporthdl)
 {
     return SERIAL_LINK_MTU;
 }
+
+
+

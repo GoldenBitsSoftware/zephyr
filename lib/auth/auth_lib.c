@@ -364,12 +364,19 @@ void auth_ringbuf_put_byte(struct auth_ringbuf *ringbuf, uint8_t one_byte)
  *
  * @param ringbuf
  * @param byte
+ * @param wait_mec, num milliseconds, or K_FOREVER, or K_NO_WAIT
+ *
  * @return
  */
-bool auth_ringbuf_get_byte(struct auth_ringbuf *ringbuf, uint8_t *one_byte)
+bool auth_ringbuf_get_byte(struct auth_ringbuf *ringbuf, uint8_t *one_byte, uint32_t wait_msec)
 {
     /* inc semaphore */
-    k_sem_take(&ringbuf->rx_sem, K_MSEC(2000));
+    int ret = k_sem_take(&ringbuf->rx_sem, K_MSEC(wait_msec));
+
+    /* Timed out or some other error. */
+    if(ret) {
+        return false;
+    }
 
     if (atomic_get(&ringbuf->head_idx) == atomic_get(&ringbuf->tail_idx)) {
         return false;

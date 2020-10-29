@@ -296,7 +296,7 @@ void auth_ringbuf_init(struct auth_ringbuf *ringbuf);
 
 void auth_ringbuf_put_byte(struct auth_ringbuf *ringbuf, uint8_t one_byte);
 
-bool auth_ringbuf_get_byte(struct auth_ringbuf *ringbuf, uint8_t *one_byte);
+bool auth_ringbuf_get_byte(struct auth_ringbuf *ringbuf, uint8_t *one_byte, uint32_t wait_msec);
 
 bool auth_ringbuf_overflow(struct auth_ringbuf *ringbuf);
 
