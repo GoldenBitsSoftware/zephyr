@@ -13,11 +13,6 @@
 #include <zephyr.h>
 #include <init.h>
 
-// DAG DEBUG BEG
-#include <logging/log.h>
-#include <logging/log_ctrl.h>
-// DAG DEBUG END
-
 
 #if defined(CONFIG_MBEDTLS)
 #if !defined(CONFIG_MBEDTLS_CFG_FILE)
@@ -50,11 +45,6 @@ LOG_MODULE_DECLARE(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 #define MAX_MBEDTLS_CONTEXT         (2u)
 #define AUTH_DTLS_COOKIE_LEN        (32u)
 
-
-#define USE_DTLS  1  /* TODO: Make this a KConfig var */
-
-
-#ifdef USE_DTLS
 #define DTLS_PACKET_SYNC_BYTES      0x45B8
 #define DTLS_HEADER_BYTES           (sizeof(struct dtls_packet_hdr))
 
@@ -73,7 +63,7 @@ struct dtls_packet_hdr {
     uint16_t packet_len;    /* size of DTLS datagram */
 };
 #pragma pack(pop)
-#endif
+
 
 
 /**
@@ -93,13 +83,11 @@ struct mbed_tls_context {
     mbedtls_timing_delay_context timer;
     mbedtls_ssl_cookie_ctx cookie_ctx;
 
-#if defined(USE_DTLS)
     /* Temp buffer used to assemble full frame when sending. */
     uint8_t temp_dtlsbuf[CONFIG_MBEDTLS_SSL_MAX_CONTENT_LEN];
 
     /* cookie used for DTLS */
     uint8_t cookie[AUTH_DTLS_COOKIE_LEN];
-#endif
 };
 
 static struct mbed_tls_context tlscontext[MAX_MBEDTLS_CONTEXT];
@@ -149,9 +137,7 @@ static void auth_init_context(struct mbed_tls_context *mbed_ctx)
     mbedtls_ctr_drbg_init(&mbed_ctx->ctr_drbg);
     mbedtls_entropy_init(&mbed_ctx->entropy);
 
-#if defined(USE_DTLS)
     sys_rand_get(mbed_ctx->cookie, sizeof(mbed_ctx->cookie));
-#endif
 }
 
 /**
@@ -394,7 +380,6 @@ static int auth_mbedtls_tx(void *ctx, const uint8_t *buf, size_t len)
         return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
     }
 
-#ifdef USE_DTLS
     struct dtls_packet_hdr *dtls_hdr;
     struct mbed_tls_context *mbedctx = (struct mbed_tls_context *)auth_conn->internal_obj;
 
@@ -427,11 +412,7 @@ static int auth_mbedtls_tx(void *ctx, const uint8_t *buf, size_t len)
 
     /* send to peripheral */
     send_cnt = auth_xport_send(auth_conn->xport_hdl, mbedctx->temp_dtlsbuf, len + DTLS_HEADER_BYTES);
-#else
-    /* TLS - just send, no need to worry about DTLS IP packet boundary.
-     * TLS can handle a steam of bytes. */
-    send_cnt = auth_xport_send(auth_conn->xport_hdl, buf, len);
-#endif
+
 
     if(send_cnt < 0) {
         LOG_ERR("Failed to send, err: %d", send_cnt);
@@ -441,7 +422,9 @@ static int auth_mbedtls_tx(void *ctx, const uint8_t *buf, size_t len)
     LOG_INF("Send %d byes.", send_cnt);
 
     /* return number bytes sent, do not include the DTLS header */
-    return (send_cnt - DTLS_HEADER_BYTES);
+    send_cnt -= DTLS_HEADER_BYTES;
+
+    return send_cnt;
 }
 
 
@@ -449,22 +432,6 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
 {
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
     int rx_bytes = 0;
-
-#if !defined(USE_DTLS)
-
-    /* For TLS just copy bytes, no need to handle DTLS packet boundary. */
-    rx_bytes = auth_xport_recv(auth_conn->xport_hdl, buffer, len, 30000);
-
-    if(rx_bytes < 0) {
-        /* some error, return correct MBedtls code */
-        /* might be just a simple time-out */
-        return 0;
-    }
-
-    return rx_bytes;
-
-#else
-
     struct dtls_packet_hdr dtls_hdr;
     uint16_t packet_len = 0;
 
@@ -561,7 +528,6 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
     }
 
     return 0;
-#endif  /* USE_DTLS */
 }
 
 
@@ -617,6 +583,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_tls_c
 {
     struct mbed_tls_context *mbed_ctx;
     int ret;
+    int transport_stream;
 
     LOG_DBG("Initializing Mbed");
 
@@ -640,16 +607,18 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_tls_c
 
     int endpoint = auth_conn->is_client ? MBEDTLS_SSL_IS_CLIENT : MBEDTLS_SSL_IS_SERVER;
 
+    transport_stream = MBEDTLS_SSL_TRANSPORT_DATAGRAM;
+
     mbedtls_ssl_config_defaults(&mbed_ctx->conf,
                                 endpoint,
-                                MBEDTLS_SSL_TRANSPORT_DATAGRAM,
+                                transport_stream,
                                 MBEDTLS_SSL_PRESET_DEFAULT);
 
 
     /* set the lower layer transport functions */
     mbedtls_ssl_set_bio(&mbed_ctx->ssl, auth_conn, auth_mbedtls_tx, auth_mbedtls_rx, NULL);
 
-    /* set max record len */
+    /* set max record len to 512, as small as possible */
     mbedtls_ssl_conf_max_frag_len(&mbed_ctx->conf, MBEDTLS_SSL_MAX_FRAG_LEN_512);
 
     /* Set the DTLS time out */
@@ -738,6 +707,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_tls_c
     mbedtls_debug_set_threshold(CONFIG_MBEDTLS_DEBUG_LEVEL);
 #endif
 
+
     if (!auth_conn->is_client) {
 
         auth_tls_set_cookie(auth_conn);
@@ -750,14 +720,9 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_tls_c
             return AUTH_ERROR_DTLS_INIT_FAILED;
         }
 
-// DAG DEBUG BEG
-        //mbedtls_ssl_conf_dtls_cookies(&mbed_ctx->conf, auth_ssl_cookie_write, auth_ssl_cookie_check,
-         //                             &mbed_ctx->cookie_ctx);
         mbedtls_ssl_conf_dtls_cookies(&mbed_ctx->conf, mbedtls_ssl_cookie_write, mbedtls_ssl_cookie_check,
                                      &mbed_ctx->cookie_ctx);
-// DAG DEBUG END
     }
-
 
     ret = mbedtls_ssl_setup(&mbed_ctx->ssl, &mbed_ctx->conf);
 
@@ -773,20 +738,6 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_tls_c
 
     return AUTH_SUCCESS;
 }
-
-// DAG DEBUG BEG
-static void process_log_msgs(void)
-{
-    while(log_process(false)) {
-        ;  /* intentionally empty statement */
-    }
-
-    /* Let the handshake thread run */
-    k_yield();
-}
-
-
-// DAG DEBUG END
 
 
 /**
@@ -858,9 +809,8 @@ void auth_dtls_thead(struct authenticate_conn *auth_conn)
 
         while(mbed_ctx->ssl.state != MBEDTLS_SSL_HANDSHAKE_OVER &&
               !auth_conn->cancel_auth) {
-            // DAG DEBUG BEG
-            LOG_INF("** STARTING Handshake state: %s", auth_tls_handshake_state(mbed_ctx->ssl.state));
-            // DAG DEBUG END
+
+            LOG_INF("Handshake state: %s", auth_tls_handshake_state(mbed_ctx->ssl.state));
 
             /* do handshake step */
             ret = mbedtls_ssl_handshake_step(&mbed_ctx->ssl);
@@ -868,10 +818,6 @@ void auth_dtls_thead(struct authenticate_conn *auth_conn)
             if(ret != 0) {
                 break;
             }
-
-// DAG DEBUG BEG
-            process_log_msgs();
-// DAG DEBUG END
         }
 
 
