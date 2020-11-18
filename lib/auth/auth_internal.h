@@ -50,7 +50,7 @@ struct auth_ringbuf {
  * A message is broken up into multiple fragments.  Each fragement has
  * sync bytes, flags, and fragment length.
  */
-#define XPORT_FRAG_SYNC_BYTE_HIGH       (0xA5)
+#define XPORT_FRAG_SYNC_BYTE_HIGH       (0xA5)  /* bits 15-4 sync byte */
 #define XPORT_FRAG_SYNC_BYTE_LOW        (0x90)
 #define XPORT_FRAG_LOWBYTE_MASK         (0xF0)  /* bits 3-0 for flags */
 

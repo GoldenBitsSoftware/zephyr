@@ -20,7 +20,9 @@ LOG_MODULE_DECLARE(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 #include <auth/auth_xport.h>
 #include "auth_internal.h"
 
-
+/**
+ * Size of a buffer used for either Tx or Rx.
+ */
 #define XPORT_IOBUF_LEN      (4096u)
 
 
@@ -131,8 +133,8 @@ static int auth_xport_buffer_put(struct auth_xport_io_buffer *iobuf, const uint8
         return AUTH_ERROR_IOBUFF_FULL;
     }
 
-    /* don't put negative or zero bytes */
-    if(num_bytes <= 0) {
+    /* don't put zero bytes */
+    if(num_bytes == 0) {
         return 0;
     }
 
@@ -197,13 +199,21 @@ static int auth_xport_buffer_put(struct auth_xport_io_buffer *iobuf, const uint8
 }
 
 /**
- * NOTE: We can probably merge this function with auth_xport_buffer_get() below.
- *       Just set the "peek" flag.
+ * Used to read bytes from an io buffer.
+ *
+ *
+ * @param iobuf       IO buffer to read.
+ * @param out_buf     Buffer to copy bytes into.
+ * @param num_bytes   Number of bytes to read
+ * @param peek        If true, then queue pointers are not updated.
+ *
+ * @return On success, number of bytes copied into buffer.  Can be less than requested.
+ *         Negative number on error.
+ *
  */
-static int auth_xport_buffer_peek(struct auth_xport_io_buffer *iobuf, uint8_t *out_buf, size_t num_bytes)
+static int auth_xport_buffer_get_internal(struct auth_xport_io_buffer *iobuf, uint8_t *out_buf,
+                                          size_t num_bytes, bool peek)
 {
-    bool peek = true;
-
     /* if no valid bytes, just return zero */
     if(iobuf->num_valid_bytes == 0) {
         return 0;
@@ -284,7 +294,22 @@ static int auth_xport_buffer_peek(struct auth_xport_io_buffer *iobuf, uint8_t *o
     k_mutex_unlock(&iobuf->buf_mutex);
 
     return (int)total_copied;
+}
 
+/**
+ * Peek at the contents of the input buffer.  Copies bytes but does not advance
+ * the queue pointers.
+ *
+ * @param iobuf       IO buffer to peek.
+ * @param out_buf     Buffer to copy bytes into.
+ * @param num_bytes   Number of bytes to peek.
+ *
+ * @return On success, number of bytes copied into buffer.  Can be less than requested.
+ *         Negative number on error.
+ */
+static int auth_xport_buffer_peek(struct auth_xport_io_buffer *iobuf, uint8_t *out_buf, size_t num_bytes)
+{
+    return auth_xport_buffer_get_internal(iobuf, out_buf, num_bytes, true);
 }
 
 /**
@@ -299,74 +324,8 @@ static int auth_xport_buffer_peek(struct auth_xport_io_buffer *iobuf, uint8_t *o
  */
 static int auth_xport_buffer_get(struct auth_xport_io_buffer *iobuf, uint8_t *out_buf, size_t num_bytes)
 {
-    /* if no valid bytes, just return zero */
-    if(iobuf->num_valid_bytes == 0) {
-        return 0;
-    }
-
-    /* lock mutex */
-    int err = k_mutex_lock(&iobuf->buf_mutex, K_FOREVER);
-    if(err) {
-        return err;
-    }
-
-    /* number bytes to copy */
-    uint32_t copy_cnt = MIN(iobuf->num_valid_bytes, num_bytes);
-    uint32_t total_copied = 0;
-    uint32_t byte_cnt = 0;
-
-    if(iobuf->head_index <= iobuf->tail_index) {
-        /* How may bytes are available? */
-        byte_cnt = XPORT_IOBUF_LEN - iobuf->tail_index;
-
-        if(byte_cnt > copy_cnt) {
-            byte_cnt = copy_cnt;
-        }
-
-        /* copy from tail to end of buffer */
-        memcpy(out_buf, iobuf->io_buffer + iobuf->tail_index, byte_cnt);
-
-        /* update tail index */
-        iobuf->tail_index += byte_cnt;
-        out_buf += byte_cnt;
-        total_copied += byte_cnt;
-
-        /* update copy count and num valid bytes */
-        copy_cnt -= byte_cnt;
-        iobuf->num_valid_bytes -= byte_cnt;
-
-        /* wrapped around, copy from beginning of buffer until
-           copy_count is satisfied */
-        if(copy_cnt > 0) {
-            memcpy(out_buf, iobuf->io_buffer, copy_cnt);
-
-            iobuf->tail_index = copy_cnt;
-            iobuf->num_valid_bytes -= copy_cnt;
-            total_copied += copy_cnt;
-        }
-
-    } else if(iobuf->head_index > iobuf->tail_index) {
-
-        byte_cnt = iobuf->head_index - iobuf->tail_index;
-
-        if(byte_cnt > copy_cnt) {
-            byte_cnt = copy_cnt;
-        }
-
-        memcpy(out_buf, iobuf->io_buffer + iobuf->tail_index, byte_cnt);
-
-        total_copied += byte_cnt;
-        copy_cnt -= byte_cnt;
-        iobuf->tail_index += byte_cnt;
-        iobuf->num_valid_bytes -= byte_cnt;
-    }
-
-    /* unlock */
-    k_mutex_unlock(&iobuf->buf_mutex);
-
-    return (int)total_copied;
+     return auth_xport_buffer_get_internal(iobuf, out_buf, num_bytes, false);
 }
-
 
 /**
  * Get data from an IO buffer, if no data present wait.
