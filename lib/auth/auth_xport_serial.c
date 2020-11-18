@@ -24,9 +24,9 @@
 LOG_MODULE_REGISTER(auth_serial_xport, CONFIG_AUTH_LOG_LEVEL);
 
 
-#define SERIAL_LINK_MTU                     (200u)
+#define SERIAL_LINK_MTU                     (600u)
 #define SERIAL_XP_BUFFER_LEN                SERIAL_LINK_MTU
-#define NUM_BUFFERS                         (6u)
+#define NUM_BUFFERS                         (7u)
 #define RX_EVENT_MSGQ_COUNT                 (10u)     /* Number of events on the msg queue. NOTE: This
                                                          queue is shared by all instances. */
 
@@ -111,6 +111,8 @@ K_MSGQ_DEFINE(recv_event_queue, sizeof(struct serial_recv_event), RX_EVENT_MSGQ_
 
 K_THREAD_STACK_DEFINE(serial_recv_thread_stack_area, SERIAL_XP_RECV_STACK_SIZE);
 
+
+// TODO
 // Defining the thread here causes a crash for some unknown reason.
 // need to debug furtehr.
 //K_THREAD_DEFINE(serial_recv, SERIAL_XP_RECV_STACK_SIZE, auth_xp_serial_recv_thrd, NULL, NULL, NULL,
@@ -124,6 +126,9 @@ ATOMIC_DEFINE(buffer_in_use, NUM_BUFFERS);
 
 /**
  * Serial buffer pool, used across all serial instances.
+ * @note:  There is a trade-off between the number of buffers and the
+ *         serial MTU size (SERIAL_LINK_MTU).  The larger the MTU size the
+ *         fewer buffers needed.
  */
 static struct serial_xp_buffer serial_xp_bufs[NUM_BUFFERS] = {
     { .in_use = false, .bufidx = 0 },
@@ -132,6 +137,7 @@ static struct serial_xp_buffer serial_xp_bufs[NUM_BUFFERS] = {
     { .in_use = false, .bufidx = 3 },
     { .in_use = false, .bufidx = 4 },
     { .in_use = false, .bufidx = 5 },
+    { .in_use = false, .bufidx = 6 }
 };
 
 
@@ -158,15 +164,14 @@ static struct serial_xp_buffer *serial_xp_buffer_info(const uint8_t *buf)
 
 
 /**
- * Serial transport receive...
- * @param serial_inst
+ * Starts serial receive thread.
  */
 
 static void auth_xp_serial_start_recvthread(void)
 {
     static struct k_thread rx_thrd;
-    
-    // TODO:  Get thread stack from stack pool?
+
+    // TODO:  Investigate why statically defining thread fails.
     k_thread_create(&rx_thrd, serial_recv_thread_stack_area,
                      K_THREAD_STACK_SIZEOF(serial_recv_thread_stack_area),
                      auth_xp_serial_recv_thrd, NULL, NULL, NULL,
@@ -336,11 +341,19 @@ static void auth_xp_serial_irq_recv_fragment(struct serial_xp_instance *xp_inst)
         }
     }
 
+    /* Check if rx buffer is full, if so then something went wrong.
+     * Log and error and drop bytes received so far */
+    if(xp_inst->curr_rx_cnt == SERIAL_XP_BUFFER_LEN) {
+        xp_inst->curr_rx_cnt = 0;
+        LOG_ERR("Receive buffer full, dropped %d bytes.", SERIAL_XP_BUFFER_LEN);
+    }
+
     num_bytes = uart_fifo_read(xp_inst->uart_dev, xp_inst->rx_buf + xp_inst->curr_rx_cnt,
                                SERIAL_XP_BUFFER_LEN - xp_inst->curr_rx_cnt);
     total_cnt += num_bytes;
 
     xp_inst->curr_rx_cnt += num_bytes;
+
 
     /* Is there a full frame? */
     if(auth_message_get_fragment(xp_inst->rx_buf, xp_inst->curr_rx_cnt,
@@ -391,13 +404,6 @@ static void auth_xp_serial_irq_recv_fragment(struct serial_xp_instance *xp_inst)
             xp_inst->rx_buf = NULL;
             xp_inst->curr_rx_cnt = 0;
         }
-    }
-
-    /* Is the current rx buffer completely full? If so, then there is
-     * no valid fragment, just garbage.  Reset the current offset */
-    if(xp_inst->curr_rx_cnt == SERIAL_XP_BUFFER_LEN) {
-        LOG_ERR("Dropping %d bytes.",  xp_inst->curr_rx_cnt);
-        xp_inst->curr_rx_cnt = 0;
     }
 }
 
