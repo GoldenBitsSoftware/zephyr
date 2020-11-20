@@ -12,6 +12,14 @@
 extern "C" {
 #endif
 
+/**
+* @brief Authentication API
+* @defgroup zauth_api Authentication API
+* @ingroup zauth
+* @{
+*/
+
+
 
 /**
  *  Determine number of auth instances, each instance performs
@@ -35,15 +43,17 @@ extern "C" {
 
 
 /**
- * Auth instance id enuma=s
+ * Auth instance id
  */
 enum auth_instance_id {
 
 #if defined(AUTH_INSTANCE_1)
+    /** Auth instance 1 */
     AUTH_INST_1_ID = 0,
 #endif
 
 #if defined(AUTH_INSTANCE_2)
+    /** Auth instnce 2 */
     AUTH_INST_2_ID = 1,
 #endif
 
@@ -53,15 +63,15 @@ enum auth_instance_id {
 
 #include <auth/auth_xport.h>
 
-
-/**
- * Should be large enough to hold one TLS record
- */
-
+/** Authentication success */
 #define AUTH_SUCCESS                        0
+/** Auth error base value */
 #define AUTH_ERROR_BASE                     (-200)
-#define AUTH_ERROR_INVALID_PARAM            (AUTH_ERROR_BASE - 1)
-#define AUTH_ERROR_NO_MEMORY                (AUTH_ERROR_BASE - 2)
+/** Invalid param passed to function */
+#define AUTH_ERROR_INVALID_PARAM            (AUTH_ERROR_BASE - 1)  \
+/** Out of memory */
+#define AUTH_ERROR_NO_MEMORY                (AUTH_ERROR_BASE - 2)  \
+/** Operation timeout */
 #define AUTH_ERROR_TIMEOUT                  (AUTH_ERROR_BASE - 3)
 #define AUTH_ERROR_NO_RESOURCE              (AUTH_ERROR_BASE - 4)
 #define AUTH_ERROR_DTLS_INIT_FAILED         (AUTH_ERROR_BASE - 5)
@@ -87,17 +97,23 @@ enum auth_instance_id {
  *  Authentication status enums
  */
 enum auth_status {
-     AUTH_STATUS_STARTED,
-     AUTH_STATUS_IN_PROCESS,
-     AUTH_STATUS_CANCELED,    /* authentication has been cancled */
-     AUTH_STATUS_FAILED,      /* an internal failure of some type */
-     AUTH_STATUS_AUTHENTICATION_FAILED,
-     AUTH_STATUS_SUCCESSFUL
+    /** Authentication started */
+    AUTH_STATUS_STARTED,
+    /** Authentication in process */
+    AUTH_STATUS_IN_PROCESS,
+    /** Authentication has been canceled */
+    AUTH_STATUS_CANCELED,
+    /** An internal failure of some type */
+    AUTH_STATUS_FAILED,
+    /** Authentication failed */
+    AUTH_STATUS_AUTHENTICATION_FAILED,
+    /** Authentication successful */
+    AUTH_STATUS_SUCCESSFUL
  };
 
 
 
- /* Forward declaration */
+/* Forward declaration */
 struct authenticate_conn;
 
 /**
@@ -156,18 +172,21 @@ struct authenticate_conn {
  * be passed to a password based authentication method such as J-PAKE.
  */
 
-/**
+/*
  * Optional parameter id
  */
 enum auth_opt_param_id {
-    AUTH_TLS_PARAM = 1,
-    AUTH_CHALRESP_PARAM,    /* Optional Challenge-Response param */
-    AUTH_PLACHOLDER_PARAM   /* for future use */
+    /** Optional DTLS param */
+    AUTH_DTLS_PARAM = 1,
+    /** Optional Challenge-Response param */
+    AUTH_CHALRESP_PARAM,
+    /** Placeholder for future use */
+    AUTH_PLACHOLDER_PARAM
 };
 
 
 /**
- * Structs specific to TLS authentication
+ * Structs specific to DTLS authentication
  */
 struct auth_certificate_info {
     const uint8_t *cert;    /* Cert or cert chain in PEM format. */
@@ -180,9 +199,9 @@ struct auth_certificate_info {
 };
 
 /**
- * TLS cert chain plus key info
+ * DTLS cert chain plus key info
  */
-struct auth_tls_certs {
+struct auth_dtls_certs {
     struct auth_certificate_info server_ca_chain_pem;
     struct auth_certificate_info device_cert_pem;
 };
@@ -209,7 +228,7 @@ struct auth_challenge_resp {
 struct auth_optional_param {
     enum auth_opt_param_id param_id;
     union opt_params {
-        struct auth_tls_certs tls_certs;
+        struct auth_dtls_certs tls_certs;
         struct auth_challenge_resp chal_resp;
 
         /* For future use, additional optional params are added
@@ -229,7 +248,7 @@ struct auth_optional_param {
  * @param opt_params   Optional params specific to the authentication method selected.  NULL if not used.
  * @param auth_flags   Authentication flags.
  *
- * @return 0 on success else one of AUTH_ERROR_* values.
+ * @return AUTH_SUCCESS on success else one of AUTH_ERROR_* values.
  */
 int auth_lib_init(struct authenticate_conn *auth_conn, enum auth_instance_id instance,
                   auth_status_cb_t status_func, void *context, struct auth_optional_param *opt_params,
@@ -241,7 +260,7 @@ int auth_lib_init(struct authenticate_conn *auth_conn, enum auth_instance_id ins
  *
  * @param auth_conn  Pointer to Authentication connection struct.
  *
- * @return  0 on success else one of AUTH_ERROR_* values.
+ * @return  AUTH_SUCCESS on success else one of AUTH_ERROR_* values.
  */
 int auth_lib_deinit(struct authenticate_conn *auth_conn);
 
@@ -251,7 +270,7 @@ int auth_lib_deinit(struct authenticate_conn *auth_conn);
  *
  * @param auth_conn  Authentication connection struct.
  *
- * @return  0 on success else one of AUTH_ERROR_* values.
+ * @return  AUTH_SUCCESS on success else one of AUTH_ERROR_* values.
  */
 int auth_lib_start(struct authenticate_conn *auth_conn);
 
@@ -260,7 +279,7 @@ int auth_lib_start(struct authenticate_conn *auth_conn);
  *
  * @param auth_conn  Authentication connection struct.
  *
- * @return One of AUTH_STATUS_*
+ * @return One of AUTH_STATUS_*  values
  */
 enum auth_status auth_lib_get_status(struct authenticate_conn *auth_conn);
 
@@ -280,7 +299,7 @@ const char *auth_lib_getstatus_str(enum auth_status status);
  *
  * @param auth_conn  Authentication connection struct.
  *
- * @return One of AUTH_STATUS_*
+ * @return One of AUTH_STATUS_* values
  */
 int auth_lib_cancel(struct authenticate_conn *auth_conn);
 
@@ -292,6 +311,12 @@ int auth_lib_cancel(struct authenticate_conn *auth_conn);
  * @param status      Authentication status.
  */
 void auth_lib_set_status(struct authenticate_conn *auth_conn, enum auth_status status);
+
+
+/**
+ * @}
+ */
+
 
 #ifdef __cplusplus
 }

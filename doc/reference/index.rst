@@ -23,4 +23,5 @@ API Reference
    usb/index.rst
    usermode/index.rst
    runtime_conf/index.rst
+   authentication/zauth_api_ref.rst
 
