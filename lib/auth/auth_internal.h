@@ -103,6 +103,15 @@ int auth_start_thread(struct authenticate_conn *auth_conn);
 
 
 /**
+ * Set the authentication status.
+ *
+ * @param auth_conn   Authentication connection struct.
+ * @param status      Authentication status.
+ */
+void auth_lib_set_status(struct authenticate_conn *auth_conn, enum auth_status status);
+
+
+/**
  * Initializes DTLS authentication method.
  *
  * @param auth_conn Pointer to Authentication connection struct.

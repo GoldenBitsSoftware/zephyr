@@ -19,7 +19,7 @@ extern "C" {
 * @{
 */
 
-
+#include <sys/util.h>
 
 /**
  *  Determine number of auth instances, each instance performs
@@ -84,13 +84,19 @@ enum auth_instance_id {
 #define AUTH_ERROR_CANCELED                 (AUTH_ERROR_BASE - 12)
 
 
-/**
+/*
  * Flags used when initializing authentication connection
  */
-#define AUTH_CONN_SERVER                    0x0001
-#define AUTH_CONN_CLIENT                    0x0002
-#define AUTH_CONN_DTLS_AUTH_METHOD          0x0004
-#define AUTH_CONN_CHALLENGE_AUTH_METHOD     0x0008
+enum auth_flags {
+    /** Server role */
+    AUTH_CONN_SERVER = BIT(0),
+    /** Client role */
+    AUTH_CONN_CLIENT = BIT(1),
+    /** Use DTLS for authentication */
+    AUTH_CONN_DTLS_AUTH_METHOD = BIT(2),
+     /** Use Challenge-Response for authentication */
+    AUTH_CONN_CHALLENGE_AUTH_METHOD = BIT(3)
+};
 
 
 /**
@@ -252,7 +258,7 @@ struct auth_optional_param {
  */
 int auth_lib_init(struct authenticate_conn *auth_conn, enum auth_instance_id instance,
                   auth_status_cb_t status_func, void *context, struct auth_optional_param *opt_params,
-                  uint32_t auth_flags);
+                  enum auth_flags auth_flags);
 
 
 /**
@@ -303,14 +309,6 @@ const char *auth_lib_getstatus_str(enum auth_status status);
  */
 int auth_lib_cancel(struct authenticate_conn *auth_conn);
 
-
-/**
- * Set the authentication status.
- *
- * @param auth_conn   Authentication connection struct.
- * @param status      Authentication status.
- */
-void auth_lib_set_status(struct authenticate_conn *auth_conn, enum auth_status status);
 
 
 /**

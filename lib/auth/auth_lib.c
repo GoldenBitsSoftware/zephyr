@@ -81,8 +81,19 @@ void auth_chalresp_thread(struct authenticate_conn *auth_conn);
  */
 static bool auth_lib_checkflags(uint32_t flags)
 {
-    /* stub for now */
-    /* TODO: Add code to check for conflicting flags */
+    /* Check for invalid flag combinations */
+
+    /* server and client roles are mutually exclusive */
+    if((flags & (AUTH_CONN_SERVER|AUTH_CONN_CLIENT)) ==
+           (AUTH_CONN_SERVER|AUTH_CONN_CLIENT)) {
+        return false;
+    }
+
+    /* can only define one auth method */
+    if((flags & (AUTH_CONN_DTLS_AUTH_METHOD|AUTH_CONN_CHALLENGE_AUTH_METHOD) )
+                 == (AUTH_CONN_DTLS_AUTH_METHOD|AUTH_CONN_CHALLENGE_AUTH_METHOD)) {
+        return false;
+    }
 
     return true;
 }
@@ -146,7 +157,7 @@ static void auth_thrd_entry(void *arg1, void *arg2, void *arg3)
  */
 int auth_lib_init(struct authenticate_conn *auth_conn, enum auth_instance_id instance,
                   auth_status_cb_t status_func, void *context, struct auth_optional_param *opt_params,
-                  uint32_t auth_flags)
+                  enum auth_flags auth_flags)
 {
     int err = 0;
 
