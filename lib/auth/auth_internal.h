@@ -11,7 +11,7 @@
  * Thread params
  */
 struct auth_thread_params {
-    volatile struct authenticate_conn *auth_conn;
+    struct authenticate_conn *auth_conn;
     struct k_sem *thrd_sem;
 };
 
@@ -110,7 +110,7 @@ int auth_start_thread(struct authenticate_conn *auth_conn);
  *
  * @return  0 on success else one of AUTH_ERROR_* values.
  */
-int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_tls_certs *certs);
+int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_dtls_certs *certs);
 
 
 /**

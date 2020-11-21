@@ -579,7 +579,7 @@ static int auth_tls_entropy(void *data, unsigned char *output, size_t len,
  * @see auth_internal.h
  *
  */
-int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_tls_certs *certs)
+int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_dtls_certs *certs)
 {
     struct mbed_tls_context *mbed_ctx;
     int ret;
