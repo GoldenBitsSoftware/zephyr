@@ -3,6 +3,7 @@
  *
  *  @brief  DTLS authentication code using Mbed DTLS
  *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <zephyr/types.h>
@@ -42,14 +43,15 @@ LOG_MODULE_DECLARE(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 #include "auth_internal.h"
 
 
-#define MAX_MBEDTLS_CONTEXT         (2u)
+#define MAX_MBEDTLS_CONTEXT         (CONFIG_NUM_AUTH_INSTANCES)
 #define AUTH_DTLS_COOKIE_LEN        (32u)
 
-#define DTLS_PACKET_SYNC_BYTES      0x45B8
+#define DTLS_PACKET_SYNC_BYTES      (0x45B8)
 #define DTLS_HEADER_BYTES           (sizeof(struct dtls_packet_hdr))
 
 #define AUTH_DTLS_MIN_TIMEOUT       (10000u)
 #define ATUH_DTLS_MAX_TIMEOUT       (30000u)
+#define AUTH_DTLS_HELLO_WAIT_MSEC   (15000u)
 
 
 /**
@@ -67,9 +69,8 @@ struct dtls_packet_hdr {
 
 
 /**
- * Keep list of internal structs which
+ * Mbed context, one context per DTLS connection.
  */
-
 struct mbed_tls_context {
     bool in_use;
 
@@ -90,13 +91,19 @@ struct mbed_tls_context {
     uint8_t cookie[AUTH_DTLS_COOKIE_LEN];
 };
 
+/**
+ * List of Mbed instances
+ */
 static struct mbed_tls_context tlscontext[MAX_MBEDTLS_CONTEXT];
 
 
 /* ===================== local functions =========================== */
 
-
-/* return NULL if unable to get context */
+/**
+ * Get a free Mbed context to use with an authentication instance.
+ *
+ * @return Pointer to context, NULL if no free context available.
+ */
 static struct mbed_tls_context *auth_get_mbedcontext(void)
 {
     // use mutex lock to protect accessing list
@@ -111,6 +118,11 @@ static struct mbed_tls_context *auth_get_mbedcontext(void)
     return NULL;
 }
 
+/**
+ * Free a Mbed context.
+ *
+ * @param mbed_ctx Pointer to context.
+ */
 static void auth_free_mbedcontext(struct mbed_tls_context *mbed_ctx)
 {
     mbed_ctx->in_use = false;
@@ -125,7 +137,11 @@ static void auth_free_mbedcontext(struct mbed_tls_context *mbed_ctx)
     mbedtls_entropy_free(&mbed_ctx->entropy);
 }
 
-
+/**
+ * Initialize Mbed context.
+ *
+ * @param mbed_ctx Pointer to context.
+ */
 static void auth_init_context(struct mbed_tls_context *mbed_ctx)
 {
     mbedtls_ssl_init(&mbed_ctx->ssl);
@@ -236,13 +252,19 @@ static const char *auth_tls_handshake_state(const mbedtls_ssl_states state)
 
 
 /**
- * Timer functions
+ * Gets the time since boot in Milliseconds, used for DTLS retry timer.  The absolute
+ * time (wall clock time) isn't necessary, just the relative time in milliseconds.
+ *
+ * @param val     Timer value
+ * @param reset   If non-zero then set current milliseconds into the time var.
+ *
+ * @return 0 if resetting the time, else the time difference in milliseconds.
  */
 static unsigned long auth_tls_timing_get_timer( struct mbedtls_timing_hr_time *val, int reset )
 {
-    unsigned long delta;
-    unsigned long *mssec = (unsigned long*) val;
-    unsigned long cur_msg = k_uptime_get_32();
+    int64_t delta;
+    int64_t *mssec = (int64_t*) val;
+    int64_t cur_msg = k_uptime_get();
 
     if(reset) {
         *mssec = cur_msg;
@@ -251,11 +273,16 @@ static unsigned long auth_tls_timing_get_timer( struct mbedtls_timing_hr_time *v
 
     delta = cur_msg - *mssec;
 
-    return delta;
+    return (unsigned long )delta;
 }
 
-/*
- * Set delays to watch
+/**
+ * Set delays to watch, final and intermediate delays.
+ *
+ * @param data    Timing delay context.
+ * @param int_ms  Intermediate delay in milliseconds.
+ * @param fin_ms  Final delay in milliseconds.
+ *
  */
 static void auth_tls_timing_set_delay( void *data, uint32_t int_ms, uint32_t fin_ms )
 {
@@ -269,13 +296,19 @@ static void auth_tls_timing_set_delay( void *data, uint32_t int_ms, uint32_t fin
     }
 }
 
-/*
- * Get number of delays expired
+/**
+ *  Determine the delay result.
+ *
+ *  @param data   Pointer to delay context.
+ *
+ *  @return -1 if cancelled, 0 if none of the delays is expired,
+ *           1 if the intermediate delay only is expired,
+ *           2 if the final delay is expired
  */
 static int auth_tls_timing_get_delay( void *data )
 {
     mbedtls_timing_delay_context *ctx = (mbedtls_timing_delay_context *)data;
-    unsigned long elapsed_ms;
+    int64_t  elapsed_ms;
 
     if( ctx->fin_ms == 0 ) {
         return -1;
@@ -283,11 +316,11 @@ static int auth_tls_timing_get_delay( void *data )
 
     elapsed_ms = auth_tls_timing_get_timer(&ctx->timer, 0);
 
-    if(elapsed_ms >= ctx->fin_ms) {
+    if(elapsed_ms >= (int64_t)ctx->fin_ms) {
         return 2;
     }
 
-    if(elapsed_ms >= ctx->int_ms) {
+    if(elapsed_ms >= (int64_t)ctx->int_ms) {
         return 1;
     }
 
@@ -295,10 +328,8 @@ static int auth_tls_timing_get_delay( void *data )
 }
 
 
-
 /**
  * Function called by Mbed stack to print debug messages.
- *
  *
  * @param ctx     Context
  * @param level   Debug level
@@ -343,13 +374,13 @@ static void auth_mbed_debug(void *ctx, int level, const char *file,
         {
             LOG_WRN(LOG_FMT, log_strdup(basename), line, log_strdup(str));
             break;
-         }
+        }
 
         case 2:
          {
             LOG_INF(LOG_FMT,  log_strdup(basename), line, log_strdup(str));
             break;
-          }
+         }
 
         case 3:
         default:
@@ -416,7 +447,7 @@ static int auth_mbedtls_tx(void *ctx, const uint8_t *buf, size_t len)
 
     if(send_cnt < 0) {
         LOG_ERR("Failed to send, err: %d", send_cnt);
-        return -1;  /* TODO: Return the correct MBED error code */
+        return MBEDTLS_ERR_NET_SEND_FAILED;
     }
 
     LOG_INF("Send %d byes.", send_cnt);
@@ -427,7 +458,15 @@ static int auth_mbedtls_tx(void *ctx, const uint8_t *buf, size_t len)
     return send_cnt;
 }
 
-
+/**
+ * Mbed receive function, called by Mbed code.
+ *
+ * @param ctx     Context.
+ * @param buffer  Buffer to copy received bytes into.
+ * @param len     Buffer byte size.
+ *
+ * @return   Number of bytes copied or negative number on error.
+ */
 static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
 {
     struct authenticate_conn *auth_conn = (struct authenticate_conn *)ctx;
@@ -448,7 +487,7 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
 
         rx_bytes = auth_xport_getnum_recvqueue_bytes_wait(auth_conn->xport_hdl, 1000u);
 
-        /* Check for canceld flag */
+        /* Check for canceled flag */
         if(auth_conn->cancel_auth) {
             return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
         }
@@ -527,9 +566,9 @@ static int auth_mbedtls_rx(void *ctx, uint8_t *buffer, size_t len)
          LOG_DBG("Waiting for more bytes to fill DTLS packet.");
     }
 
+    /* Didn't send any bytes */
     return 0;
 }
-
 
 
 /**
@@ -557,15 +596,20 @@ static int auth_tls_set_cookie(struct authenticate_conn *auth_conn)
 }
 
 /**
- * Psudo random generator for Mbed
+ * Pseudo random source for Mbed
  *
- * @param ctx
- * @param out_ran
-+* @param out_len
+ * @param data    Optional entropy source.
+ * @param output  Buffer to receive random numbers.
+ * @param len     Number of bytes requested.
+ * @param olen    Number of bytes actually returned.
+ *
+ * @return Always zero.
  */
 static int auth_tls_entropy(void *data, unsigned char *output, size_t len,
                             size_t *olen)
 {
+    (void) data;
+
     sys_rand_get(output, len);
     *olen = len;
 
@@ -585,9 +629,9 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_dtls_
     int ret;
     int transport_stream;
 
-    LOG_DBG("Initializing Mbed");
+    LOG_DBG("Initializing Mbed DTLS");
 
-    /* set context pointer */
+    /* get, init, and set context pointer */
     mbed_ctx = auth_get_mbedcontext();
 
     if (mbed_ctx == NULL) {
@@ -624,9 +668,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_dtls_
     /* Set the DTLS time out */
     mbedtls_ssl_conf_handshake_timeout(&mbed_ctx->conf, AUTH_DTLS_MIN_TIMEOUT, ATUH_DTLS_MAX_TIMEOUT);
 
-    /* OPTIONAL is usually a bad choice for security, but makes interop easier
-     * in this simplified example, in which the ca chain is hardcoded.
-     * Production code should set a proper ca chain and use REQUIRED. */
+    /*  Force verification.  */
     mbedtls_ssl_conf_authmode(&mbed_ctx->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
 
 
@@ -646,9 +688,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_dtls_
         return AUTH_ERROR_DTLS_INIT_FAILED;
     }
 
-    /**
-     * @brief Setup certs, the CA chain followed by the end device cert.
-     */
+    /* Setup certs, the CA chain followed by the end device cert. */
     if((certs->server_ca_chain_pem.cert == NULL) || (certs->server_ca_chain_pem.cert_size == 0)) {
         auth_free_mbedcontext(mbed_ctx);
         LOG_ERR("Failed to get CA cert chain");
@@ -693,6 +733,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_dtls_
         return AUTH_ERROR_DTLS_INIT_FAILED;
     }
 
+    /* set entropy source */
     mbedtls_entropy_add_source(&mbed_ctx->entropy, auth_tls_entropy, NULL,
                                      32,  MBEDTLS_ENTROPY_SOURCE_STRONG);
 
@@ -774,14 +815,17 @@ void auth_dtls_thead(struct authenticate_conn *auth_conn)
             return;
         }
 
+        /* Sit in a loop waiting for the initial Client Hello message
+         * from the client. */
         while(bytecount == 0) {
 
             if(auth_conn->cancel_auth) {
+                LOG_INF("DTLS authentication canceled.");
                 return;
             }
 
-            /* Server wait for client hello */
-            bytecount = auth_xport_getnum_recvqueue_bytes_wait(auth_conn->xport_hdl, 15000u);
+            /* Server, wait for client hello */
+            bytecount = auth_xport_getnum_recvqueue_bytes_wait(auth_conn->xport_hdl, AUTH_DTLS_HELLO_WAIT_MSEC;
 
             if(bytecount == -EAGAIN) {
                 /* simply timed out waiting for client hello, try again */

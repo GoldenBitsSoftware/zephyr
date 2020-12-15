@@ -1,7 +1,6 @@
-
-/* main.c - Application main entry point */
-
 /*
+ *  Sample authentication BLE peripheral
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -132,9 +131,10 @@ static const struct bt_data ad[] = {
 };
 
 /**
+ *  Connection callback
  *
- * @param conn
- * @param err
+ * @param conn  The Bluetooth connection.
+ * @param err   Error value, 0 == success
  */
 static void connected(struct bt_conn *conn, u8_t err)
 {
@@ -172,6 +172,12 @@ static void connected(struct bt_conn *conn, u8_t err)
     }
 }
 
+/**
+ * The disconnect callback.
+ *
+ * @param conn     Bluetooth connection struct
+ * @param reason   Disconnect reason code.
+ */
 static void disconnected(struct bt_conn *conn, u8_t reason)
 {
     struct auth_xport_evt conn_evt;
@@ -203,8 +209,9 @@ static struct bt_conn_cb conn_callbacks = {
 };
 
 /**
- * If the paring security (pincode, etc..) failed.
- * @param conn
+ * If the pairing was canceled.
+ *
+ * @param conn The Bluetooth connection.
  */
 static void auth_cancel(struct bt_conn *conn)
 {
@@ -222,7 +229,7 @@ static struct bt_conn_auth_cb auth_cb_display = {
 /**
  * Called after the BT module has initialized or not (error occurred).
  *
- * @param err
+ * @param err  Error code, 0 == success
  */
 static void bt_ready(int err)
 {
@@ -243,7 +250,14 @@ static void bt_ready(int err)
     printk("Advertising successfully started\n");
 }
 
-
+/**
+ * Authentication status callback
+ *
+ * @param auth_conn   The authentication connection.
+ * @param instance    Instance ID.
+ * @param status      Status
+ * @param context     Optional context.
+ */
 static void auth_status(struct authenticate_conn *auth_conn, enum auth_instance_id instance,
                         enum auth_status status, void *context)
 {
@@ -267,7 +281,9 @@ static void client_ccc_cfg_changed(const struct bt_gatt_attr *attr, u16_t value)
     LOG_INF("Client notifications %s", notif_enabled ? "enabled" : "disabled");
 }
 
-
+/**
+ * Process log messages
+ */
 static void process_log_msgs(void)
 {
     while(log_process(false)) {

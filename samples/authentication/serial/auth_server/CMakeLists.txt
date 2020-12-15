@@ -7,6 +7,8 @@ project(auth_serial_server)
 
 target_include_directories(app PUBLIC ${CMAKE_SOURCE_DIR})
 
+zephyr_include_directories(${CMAKE_SOURCE_DIR}/src)
+
 target_sources(app PRIVATE
   src/main.c
 )

@@ -2,6 +2,8 @@
  *  @file  auth_xport_serial.c
  *
  *  @brief  Lower serial transport layer.
+ *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <zephyr/types.h>
@@ -57,15 +59,9 @@ struct serial_xp_instance
     /* Semaphore for TX */
     struct k_sem tx_sem;
 
-#if defined(CONFIG_AUTH_FRAGMENT)
     /* current rx buffer */
     uint8_t *rx_buf;
     uint16_t curr_rx_cnt;
-#else
-    /* IO is handled as stream of bytes with no message boundary */
-    struct auth_ringbuf ring_buf;
-#endif
-
 };
 
 
@@ -81,9 +77,8 @@ struct serial_xp_buffer {
  * UART interrupt routine.
  */
 struct serial_recv_event {
-    struct serial_xp_instance *serial_inst;
 
-#if defined(CONFIG_AUTH_FRAGMENT)
+    struct serial_xp_instance *serial_inst;
     uint8_t *rx_buf;
     uint16_t frag_offset;
     uint16_t frag_len;
@@ -91,7 +86,6 @@ struct serial_recv_event {
     /* struct needs to be multiple of 4 bytes to work with the
      * message queue, add padding here */
     uint8_t pad[4];
-#endif
 };
 
 
@@ -126,6 +120,11 @@ ATOMIC_DEFINE(buffer_in_use, NUM_BUFFERS);
 
 /**
  * Serial buffer pool, used across all serial instances.
+ *
+ * @note: This is a simple implementation of a buffer pool.  Another
+ *        option considered was creating a memory slab, this buffer
+ *        pool was selected becasue of its simplicity.
+ *
  * @note:  There is a trade-off between the number of buffers and the
  *         serial MTU size (SERIAL_LINK_MTU).  The larger the MTU size the
  *         fewer buffers needed.
@@ -160,7 +159,6 @@ static struct serial_xp_buffer *serial_xp_buffer_info(const uint8_t *buf)
 
     return xp_buf;
 }
-
 
 
 /**
@@ -278,6 +276,9 @@ static void auth_xp_serial_free_instance(struct serial_xp_instance *serial_inst)
 /**
  * UART receive thread. Handles bytes from the UART interrupt routine
  * and forwards to the common transport receive queue.
+ *
+ * Handles receive byes from all of the serial instances.
+ *
  */
 static void auth_xp_serial_recv_thrd(void *arg1, void *arg2, void *arg3)
 {
@@ -292,19 +293,12 @@ static void auth_xp_serial_recv_thrd(void *arg1, void *arg2, void *arg3)
 
         if(k_msgq_get(&recv_event_queue, &recv_event, K_FOREVER) == 0) {
 
-#if defined(CONFIG_AUTH_FRAGMENT)
             auth_message_assemble(recv_event.serial_inst->xport_hdl,
                                   recv_event.rx_buf + recv_event.frag_offset,
                                   recv_event.frag_len);
 
             /* free RX buffer */
             serial_xp_free_buffer(recv_event.rx_buf);
-#else
-            uint8_t rx_byte;
-            while(auth_ringbuf_get_byte(&recv_event.serial_inst->ringbuf, &rx_byte, K_NO_WAIT ) {
-                auth_xport_put_recv(recv_event.serial_inst->xport_hdl, &rx_byte, sizeof(rx_byte));
-            }
-#endif
         }
 
     }  /* end while() */
@@ -337,6 +331,7 @@ static void auth_xp_serial_irq_recv_fragment(struct serial_xp_instance *xp_inst)
         xp_inst->curr_rx_cnt = 0;
 
         if(xp_inst->rx_buf == NULL) {
+            LOG_ERR("Out of free buffers for Rx.");
             return;
         }
     }
@@ -410,17 +405,12 @@ static void auth_xp_serial_irq_recv_fragment(struct serial_xp_instance *xp_inst)
 /**
  * For interrupt driven IO for serial link.
  *
- * @param user_data
+ * @param user_data  Used to store serial instance.
  */
 static void auth_xp_serial_irq_cb(void *user_data)
 {
     int num_bytes;
     static int total_cnt = 0;
-
-#if !defined(CONFIG_AUTH_FRAGMENT)
-    /* temp buff used to accumulate bytes */
-    uint8_t temp_byte_rx[100];
-#endif
 
     enum uart_rx_stop_reason rx_stop;
     struct serial_xp_instance *xp_inst = (struct serial_xp_instance *) user_data;
@@ -432,8 +422,8 @@ static void auth_xp_serial_irq_cb(void *user_data)
     rx_stop = uart_err_check(uart_dev);
 
     if(rx_stop != 0) {
-        /* handle error */
-        /*  UART_ERROR_OVERRUN, UART_ERROR_PARITY
+        /* An error, either:
+         *  UART_ERROR_OVERRUN, UART_ERROR_PARITY,
          *  UART_ERROR_FRAMING, UART_ERROR_BREAK
          */
         LOG_ERR("UART error: %d", rx_stop);
@@ -442,30 +432,10 @@ static void auth_xp_serial_irq_cb(void *user_data)
 
     /* read any chars first */
     while(uart_irq_rx_ready(uart_dev)) {
-
-#if defined(CONFIG_AUTH_FRAGMENT)
         auth_xp_serial_irq_recv_fragment(xp_inst);
-#else
-        /* If not fragmenting, then just put bytes into ring buffer */
-        num_bytes = uart_fifo_read(uart_dev, temp_byte_rx, sizeof(temp_byte_rx))
-
-        for (cnt = 0; cnt < num_bytes; cnt++) {
-            auth_ringbuf_put_byte(&xp_inst->ring_buf, temp_byte_rx[cnt]);
-        }
-
-        /* put recv message on queue for recv */
-        struct serial_recv_event recv_event = { .serial_inst = xp_inst };
-
-        int ret = k_msgq_put(&recv_event_queue, &recv_event, K_NO_WAIT);
-
-        if(ret) {
-            LOG_ERR("Failed to queue receive message, err: %d", ret);
-        }
-
-#endif  /* CONFIG_AUTH_FRAGMENT */
     }
 
-    /* Any data ready to send? */
+    /* Any bytes ready to send? */
     if(xp_inst->tx_bytes == 0) {
         /* check if we can disable TX */
         if(uart_irq_tx_complete(uart_dev)) {
@@ -507,7 +477,7 @@ static void auth_xp_serial_irq_cb(void *user_data)
 
 /**
  * Send bytes on the serial link.
- * NOTE: This call will block!!! Should not call from an ISR.
+ * @note: This call will block!!! Should not call from an ISR.
  *
  * @param xport_hdl  Transport handle.
  * @param data       Bytes to send.
@@ -545,8 +515,7 @@ static int auth_xp_serial_send(auth_xport_hdl_t xport_hdl, const uint8_t *data, 
     serial_inst->tx_bytes = len;
     serial_inst->curr_tx_cnt = 0;
 
-
-    /* should kick of an interrupt */
+    /* should kick off an interrupt */
     uart_irq_tx_enable(serial_inst->uart_dev);
 
     LOG_INF("Started TX operation");
@@ -568,18 +537,12 @@ static int auth_xp_serial_send(auth_xport_hdl_t xport_hdl, const uint8_t *data, 
 int auth_xp_serial_init(const auth_xport_hdl_t xport_hdl, uint32_t flags, void *xport_param)
 {
     struct auth_xp_serial_params *serial_param = (struct auth_xp_serial_params *)xport_param;
-
     struct serial_xp_instance *serial_inst = auth_xp_serial_get_instance();
 
     if(serial_inst == NULL) {
         LOG_ERR("No free serial xport instances.");
         return AUTH_ERROR_NO_RESOURCE;
     }
-
-#if !defined(CONFIG_AUTH_FRAGMENT)
-    auth_ringbuf_init(&serial_inst->ring_buf);
-#endif
-
 
     serial_inst->xport_hdl = xport_hdl;
     serial_inst->uart_dev = serial_param->uart_dev;

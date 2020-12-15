@@ -1,7 +1,6 @@
 
-/* main.c - Application main entry point */
-
-/*
+/* main.c - Application main entry point
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -85,7 +84,6 @@ static struct auth_optional_param tls_certs_param  = {
 #endif
 
 #if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
-
 #define NEW_SHARED_KEY_LEN          (32u)
 
 /* Use a different key than default */
@@ -93,7 +91,6 @@ static uint8_t chal_resp_sharedkey[NEW_SHARED_KEY_LEN] = {
     0x21, 0x8e, 0x37, 0x42, 0x1e, 0xe1, 0x2a, 0x22, 0x7c, 0x4b, 0x3f, 0x3f, 0x07, 0x5e, 0x8a, 0xd8,
     0x24, 0xdf, 0xca, 0xf4, 0x04, 0xd0, 0x3e, 0x22, 0x61, 0x9f, 0x24, 0xa3, 0xc7, 0xf6, 0x5d, 0x66
 };
-
 
 static struct auth_optional_param chal_resp_param  = {
     .param_id = AUTH_CHALRESP_PARAM,
@@ -156,7 +153,7 @@ static auth_svc_gatt_t auth_svc_gatt_tbl[AUTH_SVC_GATT_COUNT] = {
 
 
 /**
- * Params used to change the connection MTU lenght.
+ * Params used to change the connection MTU length.
  */
 struct bt_gatt_exchange_params mtu_parms;
 
@@ -165,9 +162,7 @@ void mtu_change_cb(struct bt_conn *conn, u8_t err, struct bt_gatt_exchange_param
     if(err) {
         LOG_ERR("Failed to set MTU, err: %d", err);
     } else {
-        //auth_conn->payload_size = bt_gatt_get_mtu(conn) - BLE_LINK_HEADER_BYTES;
-
-        LOG_DBG("Successfuly set MTU to: %d", bt_gatt_get_mtu(conn));
+        LOG_DBG("Successfully set MTU to: %d", bt_gatt_get_mtu(conn));
     }
 }
 
@@ -176,11 +171,12 @@ void mtu_change_cb(struct bt_conn *conn, u8_t err, struct bt_gatt_exchange_param
  * Characteristic discovery function
  *
  *
- * @param conn
- * @param attr      Discovered attribute.  NOTE: This pointer will go out fo scope
- *                  do not save pointer for future use.
- * @param params
- * @return
+ * @param conn    Bluetooth conection.
+ * @param attr    Discovered attribute.  NOTE: This pointer will go out fo scope
+ *                do not save pointer for future use.
+ * @param params  Discover params.
+ *
+ * @return BT_GATT_ITER_STOP
  */
 static u8_t discover_func(struct bt_conn *conn,
                           const struct bt_gatt_attr *attr,
@@ -195,7 +191,7 @@ static u8_t discover_func(struct bt_conn *conn,
     }
 
 
-    // debug output
+    /* debug output */
     LOG_DBG("====auth_desc_index is: %d=====", auth_desc_index);
     LOG_DBG("[ATTRIBUTE] handle 0x%x", attr->handle);
     LOG_DBG("[ATTRIBUTE] value handle 0x%x", bt_gatt_attr_value_handle(attr));
@@ -205,7 +201,7 @@ static u8_t discover_func(struct bt_conn *conn,
     bt_uuid_to_str(attr->uuid, uuid_str, sizeof(uuid_str));
     LOG_DBG("Attribute UUID: %s", log_strdup(uuid_str));
 
-    // print attribute UUID
+    /* print attribute UUID */
     bt_uuid_to_str(discover_params.uuid, uuid_str, sizeof(uuid_str));
     LOG_DBG("Discovery UUID: %s", log_strdup(uuid_str));
 
@@ -236,10 +232,10 @@ static u8_t discover_func(struct bt_conn *conn,
 
         /* save off the server attribute handle */
 
-
         /* setup the subscribe params
-          Value handle for the Client characteristic for indication of
-          peripheral data. */
+         * Value handle for the Client characteristic for indication of
+         * peripheral data.
+         */
         subscribe_params.notify = auth_xp_bt_central_notify;
         subscribe_params.value = BT_GATT_CCC_NOTIFY;
         subscribe_params.value_handle = auth_svc_gatt_tbl[AUTH_SVC_CLIENT_CHAR_INDEX].value_handle;
@@ -297,8 +293,8 @@ static u8_t discover_func(struct bt_conn *conn,
 /**
  * Connected to the peripheral device
  *
- * @param conn
- * @param conn_err
+ * @param conn       The Bluetooth connection.
+ * @param conn_err   Connection error, 0 == no error
  */
 static void connected(struct bt_conn *conn, u8_t conn_err)
 {
@@ -345,9 +341,10 @@ static void connected(struct bt_conn *conn, u8_t conn_err)
 /**
  * Parse through the BLE adv data, looking for our service
  *
- * @param data
- * @param user_data
- * @return
+ * @param data       Bluetooth data
+ * @param user_data  User data.
+ *
+ * @return true on success, else false
  */
 static bool bt_adv_data_found(struct bt_data *data, void *user_data)
 {
@@ -361,7 +358,7 @@ static bool bt_adv_data_found(struct bt_data *data, void *user_data)
         case BT_DATA_UUID16_ALL:
             if (data->data_len % sizeof(u16_t) != 0U) {
                 LOG_WRN("AD malformed");
-                return true;
+                return false;
             }
 
             for (i = 0; i < data->data_len; i += sizeof(u16_t)) {
@@ -399,12 +396,12 @@ static bool bt_adv_data_found(struct bt_data *data, void *user_data)
 }
 
 /**
- * Found a device when scanning
+ * Found a device when scanning.
  *
- * @param addr
- * @param rssi
- * @param type
- * @param ad
+ * @param addr  BT address
+ * @param rssi  Signal strength
+ * @param type  Device type
+ * @param ad    Simple buffer.
  */
 static void device_found(const bt_addr_le_t *addr, s8_t rssi, u8_t type,
                          struct net_buf_simple *ad)
@@ -421,6 +418,12 @@ static void device_found(const bt_addr_le_t *addr, s8_t rssi, u8_t type,
     }
 }
 
+/**
+ * BT disconnect callback.
+ *
+ * @param conn    The Bluetooth connection.
+ * @param reason  Disconnect reason.
+ */
 static void disconnected(struct bt_conn *conn, u8_t reason)
 {
     char addr[BT_ADDR_LE_STR_LEN];
@@ -447,17 +450,20 @@ static void disconnected(struct bt_conn *conn, u8_t reason)
 }
 
 /**
- * Connection callbacks
+ * (dis)Connection callbacks
  */
 static struct bt_conn_cb conn_callbacks = {
         .connected = connected,
         .disconnected = disconnected,
 };
 
+/**
+ * Starts scanning for device.
+ */
 static struct k_work ble_start_scan_work;
 
 /**
- *
+ * Work queue function.
  */
 static void ble_scan_work_func(struct k_work *work)
 {
@@ -472,15 +478,21 @@ static void ble_scan_work_func(struct k_work *work)
 }
 
 /**
- * Called when button is pressed, note called in interrupt context
+ * Called when button is pressed, note called in interrupt context.
+ * Starts Bluetooth scanning, connect to peripheral, and then
+ * the authentication.
  *
- * @param gpiob
- * @param cb
- * @param pins
+ * @param gpiob  GPIO device.
+ * @param cb     Callback struct
+ * @param pins   Pines
  */
 static void button_pressed(struct device *gpiob, struct gpio_callback *cb,
                            u32_t pins)
 {
+    ARG_UNUSED(gpio)
+    ARG_UNUSED(cb)
+    ARG_UNUSED(pins)
+
     LOG_DBG("Button pressed");
 
     /* Since this function is called directly by the interrupt, start
@@ -493,8 +505,9 @@ static void button_pressed(struct device *gpiob, struct gpio_callback *cb,
 }
 
 /**
+ * Initialize button used to start authentication.
  *
- * @return
+ * @return 0 on success, else -1
  */
 static int init_button(void)
 {
@@ -517,7 +530,14 @@ static int init_button(void)
     return 0;
 }
 
-
+/**
+ * Authentication status callback.
+ *
+ * @param auth_conn  Authentication connection.
+ * @param instance   Instance ID.
+ * @param status     Auth status.
+ * @param context    Optional context.
+ */
 static void auth_status(struct authenticate_conn *auth_conn,  enum auth_instance_id instance,
                         enum auth_status status, void *context)
 {
@@ -525,6 +545,9 @@ static void auth_status(struct authenticate_conn *auth_conn,  enum auth_instance
     printk("Authentication instance (%d) status: %s\n", instance, auth_lib_getstatus_str(status));
 }
 
+/**
+ * Process log messages.
+ */
 static void process_log_msgs(void)
 {
     while(log_process(false)) {
@@ -532,6 +555,9 @@ static void process_log_msgs(void)
     }
 }
 
+/**
+ * Idle process for app.
+ */
 static void idle_process(void)
 {
     /* Just spin while the BT modules handle the connection and authentication. */
@@ -545,6 +571,9 @@ static void idle_process(void)
 }
 
 
+/**
+ *  Central main entry point.
+ */
 void main(void)
 {
     int err = 0;

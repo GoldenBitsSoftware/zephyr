@@ -282,7 +282,7 @@ static bool auth_client_recv_chal_resp(struct authenticate_conn *auth_conn, cons
     client_resp.hdr.soh = CHALLENGE_RESP_SOH;
     client_resp.hdr.msg_id = AUTH_CLIENT_CHALRESP_MSG_ID;
 
-    /* Create response to the server's random challenge */
+     /* Create response to the server's random challenge */
      err = auth_chalresp_hash(server_resp.server_challenge, client_resp.client_response);
 
      if(err) {
@@ -410,7 +410,7 @@ static bool auth_server_recv_chalresp(struct authenticate_conn *auth_conn, uint8
 
     /* read just the header */
     if(!auth_server_recv_msg(auth_conn, (uint8_t*)&client_resp, sizeof(client_resp.hdr))) {
-        LOG_ERR("Failed to recieve challenge response from the Client");
+        LOG_ERR("Failed to receive challenge response from the Client");
         *status = AUTH_STATUS_FAILED;
         return false;
     }

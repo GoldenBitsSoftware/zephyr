@@ -1,7 +1,9 @@
 /**
- *  @file  auth_xport.c
+ *  @file  auth_xport_bt.c
  *
- *  @brief  BLE transport layer.
+ *  @brief  Bluetooth transport layer.
+ *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <zephyr/types.h>
@@ -22,7 +24,7 @@
 LOG_MODULE_REGISTER(auth_bt_xport, CONFIG_AUTH_LOG_LEVEL);
 
 #define AUTH_BT_WRITE_TIMEOUTMSEC       (5000u)
-#define BLE_LINK_HEADER_BYTES               (2u + 1u)  /* two bytes for header, not sure about extra byte */
+#define BT_LINK_HEADER_BYTES            (2u + 1u)  /* two bytes for header, not sure about extra byte */
 
 /**
  * Maps transport handle to a BT connection along with
@@ -58,7 +60,7 @@ struct auth_xport_connection_map {
     struct k_sem auth_indicate_sem;
     uint32_t indicate_err;
 
-    uint16_t payload_size;  /* BLE Link MTU less struct bt_att_write_req */
+    uint16_t payload_size;  /* BT Link MTU less struct bt_att_write_req */
 };
 
 
@@ -92,7 +94,6 @@ static struct auth_xport_connection_map *auth_xp_bt_getconn(struct bt_conn *conn
 
 
 #if defined(CONFIG_BT_GATT_CLIENT)
-
 /**
  *  Called by the Central (Client) to send bytes to the peripheral (Server)
  *
@@ -227,8 +228,8 @@ int auth_xp_bt_init(const auth_xport_hdl_t xport_hdl, uint32_t flags, void *xpor
 int auth_xp_bt_deinit(const auth_xport_hdl_t xport_hdl)
 {
     if( xport_hdl == NULL) {
-	LOG_ERR("Transport handle is NULL.");
-	return AUTH_ERROR_INVALID_PARAM;
+        LOG_ERR("Transport handle is NULL.");
+        return AUTH_ERROR_INVALID_PARAM;
     }
 
     /* get xport context which is where the BT connection is saved */
@@ -248,9 +249,7 @@ int auth_xp_bt_deinit(const auth_xport_hdl_t xport_hdl)
     bt_xp_conn->server_char_hdl = 0;
     bt_xp_conn->client_attr = NULL;
 
-    /* QUES: How should semaphores be handled?  Should
-     * they be reset here? */
-
+    /* clear direct send function */
     auth_xport_set_sendfunc(xport_hdl, NULL);
     auth_xport_set_context(xport_hdl, NULL);
 
@@ -273,7 +272,7 @@ int auth_xp_bt_get_max_payload(const auth_xport_hdl_t xporthdl)
 {
     struct auth_xport_connection_map *bt_xp_conn = auth_xport_get_context(xporthdl);
 
-    return (int)(bt_gatt_get_mtu(bt_xp_conn->conn) - (uint16_t)BLE_LINK_HEADER_BYTES);
+    return (int)(bt_gatt_get_mtu(bt_xp_conn->conn) - (uint16_t)BT_LINK_HEADER_BYTES);
 }
 
 #if defined(CONFIG_BT_GATT_CLIENT)
@@ -284,6 +283,7 @@ int auth_xp_bt_get_max_payload(const auth_xport_hdl_t xporthdl)
 u8_t auth_xp_bt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
                                    const void *data, u16_t length)
 {
+    int err;
     struct auth_xport_connection_map *bt_xp_conn = auth_xp_bt_getconn(conn);
 
     if(bt_xp_conn == NULL) {
@@ -291,27 +291,14 @@ u8_t auth_xp_bt_central_notify(struct bt_conn *conn, struct bt_gatt_subscribe_pa
         return BT_GATT_ITER_CONTINUE;
     }
 
-
     /* This happens when the connection is dropped */
     if(length == 0) {
-        /* TODO: signal input buff is ready */
         return BT_GATT_ITER_CONTINUE;
     }
 
-
-    // put the received bytes into the receive queue
-#if defined(CONFIG_AUTH_FRAGMENT)
+    /* put the received bytes into the receive queue */
     auth_message_hdr_to_cpu((struct auth_message_frag_hdr *)data);
-    int err = auth_message_assemble(bt_xp_conn->xporthdl, data, length);
-#else
-    int err = auth_xport_buffer_put(bt_xp_conn->xporthdl, data, length);
-#endif
-
-    /* if no error, need to return num of bytes handled. */
-    /* Ques: What if only able to put partial bytes b/c recv queue is full? */
-    if(err >= 0) {
-         err = length;
-    }
+    err = auth_message_assemble(bt_xp_conn->xporthdl, data, length);
 
     if(length < 0)  {
         LOG_ERR("Failed to set all received bytes, err: %d", length);
@@ -370,7 +357,6 @@ static int auth_xp_bt_central_tx(struct auth_xport_connection_map *bt_xp_conn, c
         bt_xp_conn->payload_size = auth_xp_bt_get_max_payload(bt_xp_conn->xporthdl);
     }
 
-
     /* if necessary break up the write */
     while(len != 0) {
 
@@ -416,7 +402,7 @@ static int auth_xp_bt_central_tx(struct auth_xport_connection_map *bt_xp_conn, c
  * Called when the Central has ACK'd receiving data
  * Function is called in the System workqueue context
  *
- * @param conn   BLE connection
+ * @param conn   Bluetooth connection
  * @param attr   Attribute
  * @param err    GATT error
  */
@@ -426,13 +412,13 @@ static void auth_xp_bt_peripheral_indicate(struct bt_conn *conn,
 {
     struct auth_xport_connection_map *bt_xp_conn = auth_xp_bt_getconn(conn);
 
-    // set error
+    /* set error */
     bt_xp_conn->indicate_err = err;
 
     // signal semaphore that chunk fo data was received from the peripheral
     k_sem_give(&bt_xp_conn->auth_indicate_sem);
 
-    /* if an error occured */
+    /* if an error occurred */
     if(err != 0) {
 	    LOG_DBG("Peripheral indication, err: %d", err);
     }
@@ -475,8 +461,8 @@ static int auth_xp_bt_peripheral_tx(struct auth_xport_connection_map *bt_xp_conn
     indicate_params.attr = bt_xp_conn->client_attr;
     indicate_params.func = auth_xp_bt_peripheral_indicate;
 
-    while (!done)
-    {
+    while (!done) {
+
         send_cnt = MIN(len, bt_xp_conn->payload_size);
 
         indicate_params.data = buf;
@@ -514,15 +500,6 @@ static int auth_xp_bt_peripheral_tx(struct auth_xport_connection_map *bt_xp_conn
 
 #endif /* CONFIG_BT_GATT_CLIENT */
 
-/**
- * @see auth_xport.h
- */
-int auth_xp_ble_event(const auth_xport_hdl_t xporthdl, struct auth_xport_evt *event)
-{
-    /* stub for now */
-    return AUTH_SUCCESS;
-}
-
 
 /**
  * @see auth_xport.h
@@ -535,12 +512,8 @@ ssize_t auth_xp_bt_central_write(struct bt_conn *conn, const struct bt_gatt_attr
     LOG_DBG("client write called, len: %d", len);
 
     /* put the received bytes into the receive queue */
-#if defined(CONFIG_AUTH_FRAGMENT)
     auth_message_hdr_to_cpu((struct auth_message_frag_hdr *)buf);
     int err = auth_message_assemble(bt_xp_conn->xporthdl, buf, len);
-#else
-    int err = auth_xport_buffer_put(bt_xp_conn->xporthdl, buf, len);
-#endif
 
     /* if no error, need to return num of bytes handled. */
     if(err >= 0) {
@@ -548,6 +521,5 @@ ssize_t auth_xp_bt_central_write(struct bt_conn *conn, const struct bt_gatt_attr
     }
 
     /* return number of bytes writen */
-    /* TODO: Test case where only a partial write occurred */
     return err;
 }

@@ -1,8 +1,11 @@
 /**
- * @file auth_internal.h
+ *  @file  auth_internal.h
  *
- * @brief
+ *  @brief  Internal functions used by the authentication library.
+ *
+ * SPDX-License-Identifier: Apache-2.0
  */
+
 
 #ifndef ZEPHYR_INCLUDE_AUTH_INTERNAL_H_
 #define ZEPHYR_INCLUDE_AUTH_INTERNAL_H_
@@ -16,36 +19,12 @@ struct auth_thread_params {
 };
 
 
-/**
- * @brief  Timeout in Msec when waiting for GATT read/write to complete.
- */
-
-
-#define AUTH_RING_BUFLEN         (200u)
-
-/**
- * Simple ring buffer used between UART ISR and the transport input
- * queue.  The transport receive queue uses a mutex to control access.
- * Can not hold a mutex in an ISR, the solution is to use a simple queue
- * using atomic vars.
- */
-struct auth_ringbuf {
-    /* rx buffer */
-    uint8_t buf[AUTH_RING_BUFLEN];
-    struct k_sem rx_sem;
-    atomic_t head_idx;
-    atomic_t tail_idx;
-    atomic_t did_overflow;
-};
-
-
-#if defined(CONFIG_AUTH_FRAGMENT)
 
 /**
  * Defines to handle message fragmentation over the different transports.
  */
-#define XPORT_MAX_MESSAGE_SIZE          650u  /* should be at large as the largest msg. */
-                                              // TODO:  Make this a CONFIG_ param
+#define XPORT_MAX_MESSAGE_SIZE          (650u)  /* should be at large as the largest msg. */
+
 /**
  * A message is broken up into multiple fragments.  Each fragement has
  * sync bytes, flags, and fragment length.
@@ -88,8 +67,6 @@ struct auth_message_fragment {
 };
 #pragma pack(pop)
 
-
-#endif  /*  CONFIG_AUTH_FRAGMENT */
 
 
 /**
@@ -254,8 +231,6 @@ int auth_server_tx(struct authenticate_conn *conn, const unsigned char *data, si
  */
 int auth_sever_rx(struct authenticate_conn *conn, uint8_t *buf, size_t len);
 
-#if defined(CONFIG_AUTH_FRAGMENT)
-
 /**
  * Scans buffer to determine if a fragment is present.
  *
@@ -281,7 +256,6 @@ bool auth_message_get_fragment(const uint8_t *buffer, uint16_t buflen, uint16_t 
  */
 int auth_message_assemble(const auth_xport_hdl_t xporthdl, const uint8_t *buf, size_t buflen);
 
-
 /**
  * Swap the fragment header from Big Endian to the processor's byte
  * ordering.
@@ -297,20 +271,5 @@ void auth_message_hdr_to_cpu(struct auth_message_frag_hdr *frag_hdr);
  * @param  frag_hdr  Pointer to message fragment header.
  */
 void auth_message_hdr_to_be16(struct auth_message_frag_hdr *frag_hdr);
-
-#endif  /* CONFIG_AUTH_FRAGMENT */
-
-
-void auth_ringbuf_init(struct auth_ringbuf *ringbuf);
-
-void auth_ringbuf_put_byte(struct auth_ringbuf *ringbuf, uint8_t one_byte);
-
-bool auth_ringbuf_get_byte(struct auth_ringbuf *ringbuf, uint8_t *one_byte, uint32_t wait_msec);
-
-bool auth_ringbuf_overflow(struct auth_ringbuf *ringbuf);
-
-void auth_ringbuf_reset(struct auth_ringbuf *ringbuf);
-
-
 
 #endif   /* ZEPHYR_INCLUDE_AUTH_INTERNAL_H_ */

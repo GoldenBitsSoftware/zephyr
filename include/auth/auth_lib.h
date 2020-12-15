@@ -2,6 +2,8 @@
  * @file auth_lib.h
  *
  * @brief  Authentication library functions
+ *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 #ifndef ZEPHYR_INCLUDE_AUTH_LIB_H_

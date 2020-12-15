@@ -2,6 +2,8 @@
  * @file auth_xport.h
  *
  * @brief
+ *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 #ifndef ZEPHYR_INCLUDE_AUTH_XPORT_H_
@@ -97,16 +99,15 @@ int auth_xport_init(auth_xport_hdl_t *xporthdl,  enum auth_instance_id instance,
 int auth_xport_deinit(const auth_xport_hdl_t xporthdl);
 
 /**
- * Forwards event to lower transport layer.
+ * Send event to the lower transport.
  *
- * @param xporthdl   Transport handle.
- * @param event      Event
+ * @param xporthdl Transport handle.
+ * @param event    Event
  *
- * @return AUTH_SUCCESS or negative error value.
+ * @return  0 on success, else -1
  */
+
 int auth_xport_event(const auth_xport_hdl_t xporthdl, struct auth_xport_evt *event);
-
-
 /**
  * Sends packet of data to peer.
  *

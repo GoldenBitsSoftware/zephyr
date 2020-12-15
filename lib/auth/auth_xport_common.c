@@ -2,6 +2,8 @@
  *  @file  auth_xport_common.c
  *
  *  @brief  Common transport routines.
+ *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <zephyr/types.h>
@@ -21,7 +23,7 @@ LOG_MODULE_DECLARE(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 #include "auth_internal.h"
 
 /**
- * Size of a buffer used for either Tx or Rx.
+ * Size of a buffer used for Rx.
  */
 #define XPORT_IOBUF_LEN      (4096u)
 
@@ -54,6 +56,7 @@ struct auth_message_recv
     bool rx_first_frag;
 };
 
+
 /**
  * Transport instance, contains send and recv circular queues.
  */
@@ -67,10 +70,8 @@ struct auth_xport_instance {
     /* If the lower transport has a send function */
     send_xport_t send_func;
 
-#if defined(CONFIG_AUTH_FRAGMENT)
     /* Struct for handling assembling message from multile fragments */
     struct auth_message_recv recv_msg;
-#endif
 
     uint32_t payload_size;  /* Max payload size for lower transport. */
 };
@@ -201,7 +202,6 @@ static int auth_xport_buffer_put(struct auth_xport_io_buffer *iobuf, const uint8
 /**
  * Used to read bytes from an io buffer.
  *
- *
  * @param iobuf       IO buffer to read.
  * @param out_buf     Buffer to copy bytes into.
  * @param num_bytes   Number of bytes to read
@@ -209,7 +209,6 @@ static int auth_xport_buffer_put(struct auth_xport_io_buffer *iobuf, const uint8
  *
  * @return On success, number of bytes copied into buffer.  Can be less than requested.
  *         Negative number on error.
- *
  */
 static int auth_xport_buffer_get_internal(struct auth_xport_io_buffer *iobuf, uint8_t *out_buf,
                                           size_t num_bytes, bool peek)
@@ -400,7 +399,7 @@ static int auth_xport_buffer_bytecount_wait(struct auth_xport_io_buffer *iobuf, 
 {
     int num_bytes = auth_xport_buffer_bytecount(iobuf);
 
-    /* an error occurred or there are bytes sitting in the io uffer. */
+    /* an error occurred or there are bytes sitting in the io buffer. */
     if(num_bytes != 0) {
         return num_bytes;
     }
@@ -452,10 +451,9 @@ static int auth_xport_internal_send(const auth_xport_hdl_t xporthdl, const uint8
     return auth_xport_buffer_put(&xp_inst->send_buf, data, len);
 }
 
-#if defined(CONFIG_AUTH_FRAGMENT)
 /**
  * Initializes message receive struct.  Used to re-assemble message
- * fragments recevied.
+ * fragments received.
  *
  * @param recv_msg Received message buffer.
  */
@@ -464,7 +462,6 @@ static void auth_message_frag_init(struct auth_message_recv *recv_msg)
     recv_msg->rx_curr_offset = 0;
     recv_msg->rx_first_frag = true;
 }
-#endif
 
 /* ==================== Non static funcs ================== */
 
@@ -485,10 +482,7 @@ int auth_xport_init(auth_xport_hdl_t *xporthdl, enum auth_instance_id instance, 
     /* init IO buffers */
     auth_xport_iobuffer_init(&xport_inst[instance].send_buf);
     auth_xport_iobuffer_init(&xport_inst[instance].recv_buf);
-
-#if defined(CONFIG_AUTH_FRAGMENT)
     auth_message_frag_init(&xport_inst[instance].recv_msg);
-#endif
 
 
 #if defined(CONFIG_BT_XPORT)
@@ -593,10 +587,6 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
         return AUTH_ERROR_INVALID_PARAM;
     }
 
-    /* if we're not message fragmentation */
-#if !defined(CONFIG_AUTH_FRAGMENT)
-    return auth_xport_internal_send(xporthdl, data, len);
-#else
     /* set frame header */
     msg_frag.hdr.sync_flags = XPORT_FRAG_SYNC_BITS|XPORT_FRAG_BEGIN;
 
@@ -623,7 +613,6 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
         /* copy body */
         memcpy(msg_frag.frag_payload, data, payload_bytes);
         msg_frag.hdr.payload_len = payload_bytes;
-
 
         /* convert header to Big Endian, network byte order */
         auth_message_hdr_to_be16(&msg_frag.hdr);
@@ -652,7 +641,6 @@ int auth_xport_send(const auth_xport_hdl_t xporthdl, const uint8_t *data, size_t
     }
 
     return send_count;
-#endif  /* CONFIG_AUTH_FRAGMENT */
 }
 
 
@@ -669,9 +657,7 @@ int auth_xport_put_recv(const auth_xport_hdl_t xporthdl, const uint8_t *buf, siz
         return AUTH_ERROR_INVALID_PARAM;
     }
 
-    int ret = auth_xport_buffer_put(&xp_inst->recv_buf, buf, buflen);
-
-    return ret;
+    return auth_xport_buffer_put(&xp_inst->recv_buf, buf, buflen);
 }
 
 
@@ -686,9 +672,7 @@ int auth_xport_recv(const auth_xport_hdl_t xporthdl, uint8_t *buf, uint32_t buf_
         return AUTH_ERROR_INVALID_PARAM;
     }
 
-    int ret = auth_xport_buffer_get_wait(&xp_inst->recv_buf, buf, buf_len, timeoutMsec);
-
-    return ret;
+    return auth_xport_buffer_get_wait(&xp_inst->recv_buf, buf, buf_len, timeoutMsec);
 }
 
 /**
@@ -702,9 +686,7 @@ int auth_xport_recv_peek(const auth_xport_hdl_t xporthdl, uint8_t *buff, uint32_
         return AUTH_ERROR_INVALID_PARAM;
     }
 
-    int ret = auth_xport_buffer_peek(&xp_inst->recv_buf, buff, buf_len);
-
-    return ret;
+    return auth_xport_buffer_peek(&xp_inst->recv_buf, buff, buf_len);
 }
 
 /**
@@ -718,9 +700,7 @@ int auth_xport_getnum_send_queued_bytes(const auth_xport_hdl_t xporthdl)
         return AUTH_ERROR_INVALID_PARAM;
     }
 
-    int numbytes = auth_xport_buffer_bytecount(&xp_inst->send_buf);
-
-    return numbytes;
+    return auth_xport_buffer_bytecount(&xp_inst->send_buf);
 }
 
 /**
@@ -734,9 +714,7 @@ int auth_xport_getnum_recvqueue_bytes(const auth_xport_hdl_t xporthdl)
         return AUTH_ERROR_INVALID_PARAM;
     }
 
-    int numbytes = auth_xport_buffer_bytecount(&xp_inst->recv_buf);
-
-    return numbytes;
+    return auth_xport_buffer_bytecount(&xp_inst->recv_buf);
 }
 
 /**
@@ -750,14 +728,9 @@ int auth_xport_getnum_recvqueue_bytes_wait(const auth_xport_hdl_t xporthdl, uint
         return AUTH_ERROR_INVALID_PARAM;
     }
 
-    int numbytes = auth_xport_buffer_bytecount_wait(&xp_inst->recv_buf, waitmsec);
-
-    return numbytes;
+    return auth_xport_buffer_bytecount_wait(&xp_inst->recv_buf, waitmsec);
 }
 
-
-
-#if defined(CONFIG_AUTH_FRAGMENT)
 
 /**
  * @see auth_internal.h
@@ -829,8 +802,8 @@ int auth_message_assemble(const auth_xport_hdl_t xporthdl, const uint8_t *buf, s
     int free_buf_space;
     int recv_ret = 0;
 
-
-    if(xp_inst == NULL) {
+    /* check input params */
+    if((xp_inst == NULL) || (buf == NULL) || (buflen == 0u)) {
         return AUTH_ERROR_INVALID_PARAM;
     }
 
@@ -842,7 +815,6 @@ int auth_message_assemble(const auth_xport_hdl_t xporthdl, const uint8_t *buf, s
     if(xp_inst->payload_size == 0) {
 	     xp_inst->payload_size = auth_xport_get_max_payload(xporthdl);
     }
-
 
     /* Reassemble a message from one for more fragments. */
     rx_frag = (struct auth_message_fragment *)buf;
@@ -955,7 +927,6 @@ void auth_message_hdr_to_be16(struct auth_message_frag_hdr *frag_hdr)
     frag_hdr->payload_len = sys_cpu_to_be16(frag_hdr->payload_len);
 }
 
-#endif  /* CONFIG_AUTH_FRAGMENT */
 
 /**
  * @see auth_xport.h

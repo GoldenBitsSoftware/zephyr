@@ -3,6 +3,8 @@
  *
  *  @brief  Authentication Library functions used to authenticate a
  *          connection between a client and server.
+ *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <zephyr/types.h>
@@ -102,7 +104,7 @@ static bool auth_lib_checkflags(uint32_t flags)
 /**
  * Invokes the status callback from the system work queue
  *
- * @param work Pointer to wor item.
+ * @param work Pointer to work item.
  */
 static void auth_lib_status_work(struct k_work *work)
 {
@@ -123,7 +125,7 @@ static void auth_lib_status_work(struct k_work *work)
 /**
  * Auth thread starts during boot and waits on semaphore.
  *
- * @param arg1  Pointer to struct auth_thread_parms.
+ * @param arg1  Pointer to struct auth_thread_params.
  * @param arg2  Unused
  * @param arg3  Unused
  */
@@ -189,7 +191,6 @@ int auth_lib_init(struct authenticate_conn *auth_conn, enum auth_instance_id ins
     auth_conn->is_client = (auth_flags & AUTH_CONN_CLIENT) ? true : false;
 
 #if defined(CONFIG_AUTH_DTLS)
-
     /* Set the DTLS authentication thread */
     auth_conn->auth_func = auth_dtls_thead;
     {
@@ -211,7 +212,6 @@ int auth_lib_init(struct authenticate_conn *auth_conn, enum auth_instance_id ins
 #endif
 
 #if defined(CONFIG_AUTH_CHALLENGE_RESPONSE)
-
     /* Set the Challenge-Response authentication thread */
     auth_conn->auth_func = auth_chalresp_thread;
 
@@ -325,87 +325,3 @@ void auth_lib_set_status(struct authenticate_conn *auth_conn, enum auth_status s
         k_work_submit(&auth_conn->auth_status_work);
     }
 }
-
-
-/* ============ Simple ring buffer routines */
-
-/**
- * @note:  The ring buffer uses a simple head/tail index and
- * puts/gets one byte at a time.  This enables the use of atomic vars
- * which can be use safely in an ISR.  For UART input, the received bytes
- * are put into this ring buffer, a separate kernel thread reads
- */
-void auth_ringbuf_init(struct auth_ringbuf *ringbuf)
-{
-    k_sem_init(&ringbuf->rx_sem, 0, AUTH_RING_BUFLEN);
-
-    auth_ringbuf_reset(ringbuf);
-}
-
-void auth_ringbuf_reset(struct auth_ringbuf *ringbuf)
-{
-    atomic_set(&ringbuf->head_idx, 0);
-    atomic_set(&ringbuf->did_overflow, 0);
-    atomic_set(&ringbuf->tail_idx, 0);
-
-    k_sem_reset(&ringbuf->rx_sem);
-}
-
-
-void auth_ringbuf_put_byte(struct auth_ringbuf *ringbuf, uint8_t one_byte)
-{
-    ringbuf->buf[atomic_inc(&ringbuf->head_idx)] = one_byte;
-
-    /* check if head index beyond fx buffer */
-    atomic_cas(&ringbuf->head_idx, AUTH_RING_BUFLEN, 0);
-
-    /* Did an overflow occur? At this point we haven't put a byte into
-     * the same place as the tail index (causing the overflow) but the buffer is
-     * full enough that we will set the overflow flag. This k*/
-    if (atomic_get(&ringbuf->head_idx) == atomic_get(&ringbuf->tail_idx)) {
-        atomic_set(&ringbuf->did_overflow, 1);
-    }
-
-    /* inc semaphore */
-    k_sem_give(&ringbuf->rx_sem);
-}
-
-/**
- * Returns true if more bytes avail
- *
- * @param ringbuf
- * @param byte
- * @param wait_mec, num milliseconds, or K_FOREVER, or K_NO_WAIT
- *
- * @return
- */
-bool auth_ringbuf_get_byte(struct auth_ringbuf *ringbuf, uint8_t *one_byte, uint32_t wait_msec)
-{
-    /* inc semaphore */
-    int ret = k_sem_take(&ringbuf->rx_sem, K_MSEC(wait_msec));
-
-    /* Timed out or some other error. */
-    if(ret) {
-        return false;
-    }
-
-    if (atomic_get(&ringbuf->head_idx) == atomic_get(&ringbuf->tail_idx)) {
-        return false;
-    }
-
-    *one_byte = ringbuf->buf[atomic_inc(&ringbuf->tail_idx)];
-
-    atomic_cas(&ringbuf->tail_idx, AUTH_RING_BUFLEN, 0);
-
-    return true;
-}
-
-
-bool auth_ringbuf_overflow(struct auth_ringbuf *ringbuf)
-{
-    return atomic_get(&ringbuf->did_overflow) == 0 ? true : false;
-}
-
-
-
-

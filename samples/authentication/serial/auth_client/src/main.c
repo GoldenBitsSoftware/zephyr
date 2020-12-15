@@ -90,7 +90,14 @@ static struct auth_optional_param chal_resp_param  = {
 /* Authentication connection info */
 static struct authenticate_conn auth_conn_serial;
 
-
+/**
+ * Authentication status callback.
+ *
+ * @param auth_conn   The authentication connection.
+ * @param instance    Authentication instance id.
+ * @param status      Authentication status.
+ * @param context     Optional context
+ */
 void auth_status_callback(struct authenticate_conn *auth_conn, enum auth_instance_id instance,
                           enum auth_status status, void *context)
 {
@@ -104,6 +111,9 @@ void auth_status_callback(struct authenticate_conn *auth_conn, enum auth_instanc
     }
 }
 
+/**
+ * Process log messages
+ */
 static void process_log_msgs(void)
 {
     while(log_process(false)) {
@@ -111,6 +121,9 @@ static void process_log_msgs(void)
     }
 }
 
+/**
+ * Idle processing.
+ */
 static void idle_process(void)
 {
     /* Just spin while the BT modules handle the connection and authentication. */
@@ -123,6 +136,12 @@ static void idle_process(void)
     }
 }
 
+
+/**
+ * Configures the UART
+ *
+ * @return 0 on success, else negative error code.
+ */
 static int config_uart(void)
 {
     struct auth_xp_serial_params xp_params;
