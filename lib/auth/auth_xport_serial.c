@@ -103,14 +103,14 @@ static struct serial_xp_instance serial_xp_inst[CONFIG_NUM_AUTH_INSTANCES];
  */
 K_MSGQ_DEFINE(recv_event_queue, sizeof(struct serial_recv_event), RX_EVENT_MSGQ_COUNT, 4);
 
-K_THREAD_STACK_DEFINE(serial_recv_thread_stack_area, SERIAL_XP_RECV_STACK_SIZE);
+//K_THREAD_STACK_DEFINE(serial_recv_thread_stack_area, SERIAL_XP_RECV_STACK_SIZE);
 
 
 // TODO
 // Defining the thread here causes a crash for some unknown reason.
 // need to debug furtehr.
-//K_THREAD_DEFINE(serial_recv, SERIAL_XP_RECV_STACK_SIZE, auth_xp_serial_recv_thrd, NULL, NULL, NULL,
-//SERIAL_XP_RECV_THRD_PRIORITY, 0, 0);
+K_THREAD_DEFINE(serial_recv, SERIAL_XP_RECV_STACK_SIZE, auth_xp_serial_recv_thrd, NULL, NULL, NULL,
+                       SERIAL_XP_RECV_THRD_PRIORITY, 0, 0);
 
 /* Atomic bits to determine if a buffer is in use.  If bit is set
  * buffer is in use. */
@@ -169,6 +169,7 @@ static void auth_xp_serial_start_recvthread(void)
 {
     static struct k_thread rx_thrd;
 
+    /*
     // TODO:  Investigate why statically defining thread fails.
     k_thread_create(&rx_thrd, serial_recv_thread_stack_area,
                      K_THREAD_STACK_SIZEOF(serial_recv_thread_stack_area),
@@ -176,6 +177,7 @@ static void auth_xp_serial_start_recvthread(void)
                      SERIAL_XP_RECV_THRD_PRIORITY,
                      0,  // options
                      K_NO_WAIT);
+                     */
 }
 
 /**

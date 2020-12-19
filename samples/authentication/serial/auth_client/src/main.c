@@ -47,9 +47,9 @@ static const uint8_t auth_dev_client_cert[] = AUTH_CLIENT_CERT_PEM;
 static const uint8_t auth_client_privatekey[] = AUTH_CLIENT_PRIVATE_KEY_PEM;
 
 static struct auth_optional_param tls_certs_param  = {
-    .param_id = AUTH_TLS_PARAM,
+    .param_id = AUTH_DTLS_PARAM,
     .param_body = {
-        .tls_certs = {
+        .dtls_certs = {
             .server_ca_chain_pem = {
                 .cert = auth_cert_ca_chain,
                 .cert_size = sizeof(auth_cert_ca_chain),

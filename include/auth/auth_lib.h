@@ -236,7 +236,7 @@ struct auth_challenge_resp {
 struct auth_optional_param {
     enum auth_opt_param_id param_id;
     union opt_params {
-        struct auth_dtls_certs tls_certs;
+        struct auth_dtls_certs dtls_certs;
         struct auth_challenge_resp chal_resp;
 
         /* For future use, additional optional params are added

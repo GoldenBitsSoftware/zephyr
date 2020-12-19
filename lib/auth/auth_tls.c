@@ -825,7 +825,7 @@ void auth_dtls_thead(struct authenticate_conn *auth_conn)
             }
 
             /* Server, wait for client hello */
-            bytecount = auth_xport_getnum_recvqueue_bytes_wait(auth_conn->xport_hdl, AUTH_DTLS_HELLO_WAIT_MSEC;
+            bytecount = auth_xport_getnum_recvqueue_bytes_wait(auth_conn->xport_hdl, AUTH_DTLS_HELLO_WAIT_MSEC);
 
             if(bytecount == -EAGAIN) {
                 /* simply timed out waiting for client hello, try again */

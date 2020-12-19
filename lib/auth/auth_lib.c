@@ -194,12 +194,12 @@ int auth_lib_init(struct authenticate_conn *auth_conn, enum auth_instance_id ins
     /* Set the DTLS authentication thread */
     auth_conn->auth_func = auth_dtls_thead;
     {
-        if(opt_params == NULL || opt_params->param_id != AUTH_TLS_PARAM) {
+        if(opt_params == NULL || opt_params->param_id != AUTH_DTLS_PARAM) {
             LOG_ERR("Missing certificates for TLS/DTLS authentication.");
             return AUTH_ERROR_INVALID_PARAM;
         }
 
-        struct auth_tls_certs *certs = &opt_params->param_body.tls_certs;
+        struct auth_dtls_certs *certs = &opt_params->param_body.dtls_certs;
 
         // init TLS layer
         err = auth_init_dtls_method(auth_conn, certs);
