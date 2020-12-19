@@ -63,10 +63,10 @@ static const uint8_t auth_cert_ca_chain[] = AUTH_ROOTCA_CERT_PEM AUTH_INTERMEDIA
 static const uint8_t auth_dev_client_cert[] = AUTH_CLIENT_CERT_PEM;
 static const uint8_t auth_client_privatekey[] = AUTH_CLIENT_PRIVATE_KEY_PEM;
 
-static struct auth_optional_param tls_certs_param  = {
-    .param_id = AUTH_TLS_PARAM,
+static struct auth_optional_param dtls_certs_param  = {
+    .param_id = AUTH_DTLS_PARAM,
     .param_body = {
-        .tls_certs = {
+        .dtls_certs = {
             .server_ca_chain_pem = {
                 .cert = auth_cert_ca_chain,
                 .cert_size = sizeof(auth_cert_ca_chain),
@@ -489,9 +489,9 @@ static void ble_scan_work_func(struct k_work *work)
 static void button_pressed(struct device *gpiob, struct gpio_callback *cb,
                            u32_t pins)
 {
-    ARG_UNUSED(gpio)
-    ARG_UNUSED(cb)
-    ARG_UNUSED(pins)
+    ARG_UNUSED(gpiob);
+    ARG_UNUSED(cb);
+    ARG_UNUSED(pins);
 
     LOG_DBG("Button pressed");
 
@@ -594,7 +594,7 @@ void main(void)
     flags |= AUTH_CONN_DTLS_AUTH_METHOD;
 
     /* set TLS certs */
-    opt_parms = &tls_certs_param;
+    opt_parms = &dtls_certs_param;
     printk("Using DTLS authentication method.\n");
 #endif
 
