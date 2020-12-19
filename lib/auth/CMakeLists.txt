@@ -13,7 +13,7 @@ if(CONFIG_AUTH_LIB)
 
     zephyr_library_sources_ifdef(CONFIG_AUTH_CHALLENGE_RESPONSE auth_chalresp.c)
 
-    zephyr_library_sources_ifdef(CONFIG_AUTH_DTLS auth_tls.c)
+    zephyr_library_sources_ifdef(CONFIG_AUTH_DTLS auth_dtls.c)
 endif()
 
 # Is this the correct way to include Mbed TLS module directory?
