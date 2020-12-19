@@ -21,13 +21,9 @@ Kconfig Options
 
 :option:`AUTH_CHALLENGE_RESPONSE`: Selects the Challenge Response authentication method
 
-
 :option:`AUTH_DTLS`: Selects the DTLS authentication method.
 
-:option:`AUTH_LOG_LEVEL`: Auhentication log level, 0-4
-
-:option:`AUTH_FRAGMENT`: Enable fragmentation.  Used to break up mesasges into smaller chunks
-over the lower transport.
+:option:`AUTH_LOG_LEVEL`: Authentication log level, 0-4
 
 :option:`BT_XPORT`:  Use Bluetooth as lower transport.
 

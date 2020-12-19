@@ -228,7 +228,15 @@ int auth_lib_init(struct authenticate_conn *auth_conn, enum auth_instance_id ins
     }
 #endif
 
-    /* set auth connect into thread param instance */
+    /*
+     * Set auth connect into thread param instance.
+     *
+     * @note:  k_sem_give() is called to start the thread, which provides
+     * a compile_barrier() and for SMP systems should handle any
+     * necessary memory barriers and/or cache syncing.
+     * The important point is the auth_conn pointer is set into
+     * a structure used by another thread (auth_thrd_entry)
+     */
     thrd_params[instance].auth_conn = auth_conn;
 
     return AUTH_SUCCESS;
