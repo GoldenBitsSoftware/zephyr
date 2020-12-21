@@ -475,7 +475,7 @@ static int auth_xp_bt_peripheral_tx(struct auth_xport_connection_map *bt_xp_conn
         }
 
         /* wait on semaphore before sending next chunk */
-        ret = k_sem_take(&bt_xp_conn->auth_indicate_sem, 3000 /* TODO: Make this a #define */);
+        ret = k_sem_take(&bt_xp_conn->auth_indicate_sem, AUTH_BT_WRITE_TIMEOUTMSEC);
 
         /* on wakeup check if error occurred */
         if(ret) {
