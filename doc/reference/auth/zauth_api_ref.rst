@@ -146,12 +146,12 @@ protocol. Messages are different sizes and depending on the lower transport, may
 size.  For example, the default MTU for Bluetooth is 23 bytes versus the 512 byte minimum possible for DTLS record.
 
 
-Some authentication methods are designed to handle a continuous byte stream (i.e. TLS) others require complete
-messages (i.e. Challenge-Response).  For those authentication methods requiring complete messages, ZAUTH
-can disassemble and re-assemble messages over the transport layer.  For example, if a 267 byte message is send over
-a Bluetooth link with an MTU of 150, ZAUTH will break up the message into one 150 byte message and a second 117
-byte fragments when sending.  The receiving side will reassemble the fragments into the original 267 byte message
-before forwarding to the Rx queue.
+Authentication messages larger than the underlying transport MTU are fragmented; ZAUTH disassembles and
+re-assembles messages over the transport layer.  For example, if a 267 byte message is send over a Bluetooth link
+with an MTU of 150, ZAUTH will break up the message into one 150 byte message and a second 117 byte fragments when
+sending.  The receiving side will reassemble the fragments into the original 267 byte message before
+forwarding to the Rx queue.  An important caveat is ZAUTH does not handle reordering of fragments, if fragment 2
+arrives before fragment 1, the message is corrupted.
 
 
 The diagram below shows how the Tx and Rx queues are used along with message fragmentation.
