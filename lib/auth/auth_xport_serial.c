@@ -34,7 +34,7 @@ LOG_MODULE_REGISTER(auth_serial_xport, CONFIG_AUTH_LOG_LEVEL);
 
 #define MAX_SERIAL_INSTANCES                (3u)
 #define SERIAL_XP_RECV_THRD_PRIORITY        (0)
-#define SERIAL_XP_RECV_STACK_SIZE           (1024)
+#define SERIAL_XP_RECV_STACK_SIZE           (1024u)
 
 #define SERIAL_TX_WAIT_MSEC                 (1500u)
 
@@ -89,27 +89,23 @@ struct serial_recv_event {
 };
 
 
-/**
- * Receive thread.  Handles bytes received from the ISR and forwards to
- * the receive queue.
- */
-static void auth_xp_serial_recv_thrd(void *arg1, void *arg2, void *arg3);
-
-
 static struct serial_xp_instance serial_xp_inst[CONFIG_NUM_AUTH_INSTANCES];
-
-/**
- * Receive event message queue
- */
-K_MSGQ_DEFINE(recv_event_queue, sizeof(struct serial_recv_event), RX_EVENT_MSGQ_COUNT, 4);
 
 
 /**
  * Serial receive thread.  Used to forward bytes from the ISR to the
  * transport receive queue.  One thread used for all serial instances.
  */
+static void auth_xp_serial_recv_thrd(void *arg1, void *arg2, void *arg3);
+
 K_THREAD_DEFINE(serial_recv, SERIAL_XP_RECV_STACK_SIZE, auth_xp_serial_recv_thrd, NULL, NULL, NULL,
-                       SERIAL_XP_RECV_THRD_PRIORITY, 0, 0);
+                   SERIAL_XP_RECV_THRD_PRIORITY, 0, 0);
+
+/**
+ * Receive event message queue
+ */
+K_MSGQ_DEFINE(recv_event_queue, sizeof(struct serial_recv_event), RX_EVENT_MSGQ_COUNT, 4);
+
 
 /* Atomic bits to determine if a buffer is in use.  If bit is set
  * buffer is in use. */
@@ -588,6 +584,8 @@ int auth_xp_serial_get_max_payload(const auth_xport_hdl_t xporthdl)
 {
     return SERIAL_LINK_MTU;
 }
+
+
 
 
 
