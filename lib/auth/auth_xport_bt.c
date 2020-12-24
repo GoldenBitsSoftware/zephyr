@@ -70,9 +70,11 @@ static struct auth_xport_connection_map bt_conn_map[CONFIG_BT_MAX_CONN];
 /**
  *  Forward declarations
  */
+#if defined(CONFIG_BT_GATT_CLIENT)
 static int auth_xp_bt_central_tx(struct auth_xport_connection_map *bt_xp_conn, const unsigned char *buf, size_t len);
+#else
 static int auth_xp_bt_peripheral_tx(struct auth_xport_connection_map *bt_xp_conn, const unsigned char *buf, size_t len);
-
+#endif
 
 /**
  * Given a BT connection, return the xport connection info.
