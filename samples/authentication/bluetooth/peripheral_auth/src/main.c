@@ -79,10 +79,10 @@ static const uint8_t auth_dev_server_cert[] = AUTH_SERVER_CERT_PEM;
 static const uint8_t auth_server_privatekey[] = AUTH_SERVER_PRIVATE_KEY_PEM;
 
 
-static struct auth_optional_param tls_certs_param  = {
-    .param_id = AUTH_TLS_PARAM,
+static struct auth_optional_param dtls_certs_param  = {
+    .param_id = AUTH_DTLS_PARAM,
     .param_body = {
-        .tls_certs = {
+        .dtls_certs = {
             .server_ca_chain_pem = {
                 .cert = auth_cert_ca_chain,
                 .cert_size = sizeof(auth_cert_ca_chain),
@@ -305,7 +305,7 @@ void main(void)
     auth_flags |= AUTH_CONN_DTLS_AUTH_METHOD;
 
     /* Add certificates to authentication instance.*/
-    opt_parms = &tls_certs_param;
+    opt_parms = &dtls_certs_param;
 
     printk("Using DTLS authentication method.\n");
 #endif
