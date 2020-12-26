@@ -91,11 +91,24 @@ static struct auth_optional_param chal_resp_param  = {
 /* Authentication connection info */
 static struct authenticate_conn auth_conn_serial;
 
-
-void auth_status_callback(struct authenticate_conn *auth_conn, enum auth_instance_id instance,
+/**
+ * Authentication status callback.
+ *
+ * @param auth_conn   The authentication connection.
+ * @param instance    Authentication instance.
+ * @param status      Status
+ * @param context     Optional context.
+ */
+static void auth_status_callback(struct authenticate_conn *auth_conn, enum auth_instance_id instance,
                           enum auth_status status, void *context)
 {
-    LOG_INF("Authentication instance (%d) status: %s", instance, auth_lib_getstatus_str(status));
+    printk("Authentication instance (%d) status: %s\n", instance, auth_lib_getstatus_str(status));
+
+#if defined(CONFIG_AUTH_DTLS)
+    if(status == AUTH_STATUS_IN_PROCESS) {
+        printk("     May take 1-2 minutes.\n");
+    }
+#endif
 
     if((status == AUTH_STATUS_FAILED) || (status == AUTH_STATUS_AUTHENTICATION_FAILED) ||
        (status == AUTH_STATUS_SUCCESSFUL))
@@ -124,6 +137,11 @@ static void idle_process(void)
     }
 }
 
+/**
+ *  Configure the UART params.
+ *
+ * @return 0 on success, else negative error value.
+ */
 static int config_uart(void)
 {
     struct auth_xp_serial_params xp_params;
@@ -139,7 +157,6 @@ static int config_uart(void)
 
     /* If successful,then init lower transport layer. */
     xp_params.uart_dev = uart_dev;
-    //xp_params.payload_size = 2048;
 
     err = auth_xport_init(&auth_conn_serial.xport_hdl,  0, &xp_params);
 
@@ -189,6 +206,7 @@ void main(void)
     /* If successful, then configure the UAR and start the
      * authentication process */
     if(!err) {
+
         /* configure the UART and init the lower serial transport */
         err = config_uart();
 
