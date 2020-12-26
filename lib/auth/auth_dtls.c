@@ -650,8 +650,6 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_dtls_
 
     int endpoint = auth_conn->is_client ? MBEDTLS_SSL_IS_CLIENT : MBEDTLS_SSL_IS_SERVER;
 
-    transport_stream = MBEDTLS_SSL_TRANSPORT_DATAGRAM;
-
     mbedtls_ssl_config_defaults(&mbed_ctx->conf,
                                 endpoint,
                                 MBEDTLS_SSL_TRANSPORT_DATAGRAM,
