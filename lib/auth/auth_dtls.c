@@ -42,7 +42,7 @@ LOG_MODULE_DECLARE(auth_lib, CONFIG_AUTH_LOG_LEVEL);
 #include <auth/auth_lib.h>
 #include "auth_internal.h"
 
-
+#define MBED_ERROR_BUFLEN           (150u)
 #define MAX_MBEDTLS_CONTEXT         (CONFIG_NUM_AUTH_INSTANCES)
 #define AUTH_DTLS_COOKIE_LEN        (32u)
 
@@ -627,7 +627,6 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_dtls_
 {
     struct mbed_tls_context *mbed_ctx;
     int ret;
-    int transport_stream;
 
     LOG_DBG("Initializing Mbed DTLS");
 
@@ -655,7 +654,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_dtls_
 
     mbedtls_ssl_config_defaults(&mbed_ctx->conf,
                                 endpoint,
-                                transport_stream,
+                                MBEDTLS_SSL_TRANSPORT_DATAGRAM,
                                 MBEDTLS_SSL_PRESET_DEFAULT);
 
 
@@ -789,6 +788,7 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_dtls_
  */
 void auth_dtls_thead(struct authenticate_conn *auth_conn)
 {
+    char err_buf[MBED_ERROR_BUFLEN];
     int bytecount = 0;
     struct mbed_tls_context *mbed_ctx = (struct mbed_tls_context *) auth_conn->internal_obj;
 
@@ -902,7 +902,11 @@ void auth_dtls_thead(struct authenticate_conn *auth_conn)
         LOG_INF("DTLS Handshake success.");
         ret = AUTH_SUCCESS;
     } else {
-        LOG_ERR("DTLS Handshake failed, error: 0x%x", -ret);
+        /* All of the MBed error are of the form -0xXXXX.  To display
+         * correctly negate the error value, thus -ret */
+        LOG_ERR("DTLS Handshake failed, error: -0x%x", -ret);
+        mbedtls_strerror(ret, err_buf, sizeof(err_buf));
+        LOG_ERR("%s", log_strdup(err_buf));
     }
 
 
