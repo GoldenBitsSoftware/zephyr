@@ -261,8 +261,14 @@ static void bt_ready(int err)
 static void auth_status(struct authenticate_conn *auth_conn, enum auth_instance_id instance,
                         enum auth_status status, void *context)
 {
-    /* print out auth status */
-    printk("Authentication status: %s\n", auth_lib_getstatus_str(status));
+    /* display status */
+    printk("Authentication instance (%d) status: %s\n", instance, auth_lib_getstatus_str(status));
+
+#if defined(CONFIG_AUTH_DTLS)
+    if(status == AUTH_STATUS_IN_PROCESS) {
+        printk("     May take 1-2 minutes.\n");
+    }
+#endif
 }
 
 
