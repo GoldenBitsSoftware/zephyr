@@ -101,7 +101,14 @@ static struct authenticate_conn auth_conn_serial;
 void auth_status_callback(struct authenticate_conn *auth_conn, enum auth_instance_id instance,
                           enum auth_status status, void *context)
 {
-    LOG_INF("Authentication instance (%d) status: %s", instance, auth_lib_getstatus_str(status));
+    printk("Authentication instance (%d) status: %s\n", instance, auth_lib_getstatus_str(status));
+
+#if defined(CONFIG_AUTH_DTLS)
+	if(status == AUTH_STATUS_IN_PROCESS) {
+        printk("     May take 1-2 minutes.\n");
+    }
+#endif
+
 
     if((status == AUTH_STATUS_FAILED) || (status == AUTH_STATUS_AUTHENTICATION_FAILED) ||
        (status == AUTH_STATUS_SUCCESSFUL))
