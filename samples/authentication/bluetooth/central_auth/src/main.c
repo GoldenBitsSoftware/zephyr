@@ -543,6 +543,12 @@ static void auth_status(struct authenticate_conn *auth_conn,  enum auth_instance
 {
     /* display status */
     printk("Authentication instance (%d) status: %s\n", instance, auth_lib_getstatus_str(status));
+
+#if defined(CONFIG_AUTH_DTLS)
+	if(status == AUTH_STATUS_IN_PROCESS) {
+        printk("     May take 1-2 minutes.\n");
+    }
+#endif
 }
 
 /**
