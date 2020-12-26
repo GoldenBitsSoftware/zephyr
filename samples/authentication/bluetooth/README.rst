@@ -8,8 +8,10 @@ Overview
 
 There are two Bluetooth firmware applications, central and peripheral.  The Central acts as t
 he client, the peripheral acts as the server.  The Central initiates the authentication
-messages. The Central starts scanning and the authentication process after the DT_ALIAS_SW0_GPIOS_PIN
-button is pressed.  For the Nordic nRF52840 DK, this GPIO maps to button Button 3.
+messages.
+
+IMPORTANT: The Central starts scanning and the authentication process after the DT_ALIAS_SW0_GPIOS_PIN
+button is pressed.  For the Nordic nRF52840 DK, this GPIO maps to button Button 1.
 
 The authentication method, DTLS or Challenge-Response, is configurable via KConfig menu.
 
