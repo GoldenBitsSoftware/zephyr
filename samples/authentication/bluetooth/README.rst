@@ -21,4 +21,6 @@ This sample was developed and tested with two Nordic nRF52840 dev
 kits (see: https://www.nordicsemi.com/Software-and-Tools/Development-Kits/nRF52840-DK).  Two Ubuntu
 VMs were used, one running the Central the other VM running the Peripheral.
 
+To build with DTLS:
+`cmake -Bbuild_auth_ble_server -DBOARD=nrf52840_pca10056 -DCONF_FILE=dtls.prj.conf samples/authentication/bluetooth/peripheral_auth/
 
