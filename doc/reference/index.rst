@@ -9,6 +9,7 @@ API Reference
    overview.rst
    terminology.rst
    audio/index.rst
+   auth/auth_api_ref.rst
    misc/notify.rst
    bluetooth/index.rst
    kconfig/index.rst
@@ -37,3 +38,4 @@ API Reference
    settings/index.rst
    timing_functions/index.rst
    virtualization/index.rst
+
