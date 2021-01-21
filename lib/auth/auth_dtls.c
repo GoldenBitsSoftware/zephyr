@@ -797,6 +797,53 @@ int auth_init_dtls_method(struct authenticate_conn *auth_conn, struct auth_dtls_
 	return AUTH_SUCCESS;
 }
 
+// DAG DEBUG BEG
+/**
+ * @see auth_internal.h
+ */
+int auth_dtls_send(struct authenticate_conn *auth_conn, void *data, size_t len)
+{
+	int bytes_sent;
+	struct mbed_tls_context *mbed_ctx = (struct mbed_tls_context *)auth_conn->internal_obj;
+
+	if(mbed_ctx == NULL) {
+		return AUTH_ERROR_INTERNAL;
+	}
+
+	bytes_sent = mbedtls_ssl_write(&mbed_ctx->ssl, data, len);
+
+	if(bytes_sent < 0) {
+		LOG_ERR("Failed to send via DTLS, error: -0x%x", -bytes_sent);
+		return AUTH_ERROR_IO_ERR;
+	}
+
+	return bytes_sent;
+}
+
+/**
+ * @see auth_internal.h
+ */
+int auth_dtls_recv(struct authenticate_conn *auth_conn, void *buf, size_t buf_len)
+{
+	int bytes_recv;
+	struct mbed_tls_context *mbed_ctx = (struct mbed_tls_context *)auth_conn->internal_obj;
+
+	if(mbed_ctx == NULL) {
+		return AUTH_ERROR_INTERNAL;
+	}
+
+	bytes_recv = mbedtls_ssl_read(&mbed_ctx->ssl, buf, buf_len);
+
+	if(bytes_recv < 0) {
+		LOG_ERR("Failed to receive via DTLS, error: -0x%x", -bytes_recv);
+		return AUTH_ERROR_IO_ERR;
+	}
+
+	return bytes_recv;
+}
+
+// DAG DEBUG END
+
 
 /**
  * If performing a DTLS handshake
