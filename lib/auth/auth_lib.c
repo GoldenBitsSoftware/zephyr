@@ -340,7 +340,7 @@ int auth_lib_recv(struct authenticate_conn *auth_conn, void *data, size_t len)
 		return AUTH_ERROR_XPORT_SEND;
 	}
 
-	bytes_recv = auth_dtls_send(auth_conn, data, len);
+	bytes_recv = auth_dtls_recv(auth_conn, data, len);
 #endif
 	return bytes_recv;
 }
