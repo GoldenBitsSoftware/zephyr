@@ -38,4 +38,3 @@ API Reference
    settings/index.rst
    timing_functions/index.rst
    virtualization/index.rst
-
