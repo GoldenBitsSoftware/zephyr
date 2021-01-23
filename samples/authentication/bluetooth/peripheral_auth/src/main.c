@@ -304,11 +304,12 @@ static void auth_status(struct authenticate_conn *auth_conn, enum auth_instance_
 // DAG DEBUG BEG
 #if defined(CONFIG_AUTH_DTLS)
 
-#define ECHO_BUFFER_LEN		(30)
+#define ECHO_BUFFER_LEN		(200)
 static void echo_msg(void)
 {
 	uint8_t recv_msg_buffer[ECHO_BUFFER_LEN];
 	int recv_cnt;
+	int msg_cnt = 1;
 	int ret;
 
 	while(true) {
@@ -329,6 +330,8 @@ static void echo_msg(void)
 			LOG_ERR("Failed to send echo test message, ret: %d", ret);
 			break;
 		}
+
+		printk("Echo message: %d\r", msg_cnt++);
 	}
 }
 #endif
