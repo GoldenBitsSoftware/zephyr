@@ -496,7 +496,7 @@ static void auth_status(struct authenticate_conn *auth_conn,  enum auth_instance
 // DAG DEBUG BEG
 #if defined(CONFIG_AUTH_DTLS)
 
-#define ECHO_BUFFER_LEN		(30)
+#define ECHO_BUFFER_LEN		(200)
 static void echo_msg(void)
 {
 	uint8_t send_msg_buffer[ECHO_BUFFER_LEN];
@@ -509,7 +509,7 @@ static void echo_msg(void)
 	while(true) {
 
 		/* set buffer with known value, increment for each loop. */
-		memset(send_msg_buffer, msg_cnt++, sizeof(send_msg_buffer));
+		memset(send_msg_buffer, msg_cnt, sizeof(send_msg_buffer));
 
 		ret = auth_lib_send(&central_auth_conn, send_msg_buffer, msg_len);
 
@@ -532,6 +532,8 @@ static void echo_msg(void)
 			LOG_ERR("Echo message check failed.");
 			break;
 		}
+
+		printk("Echo message: %d\r", msg_cnt++);
 	}
 }
 #endif
