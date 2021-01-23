@@ -96,6 +96,13 @@ enum auth_instance_id {
 /** The authentication was canceled*/
 #define AUTH_ERROR_CANCELED                 (AUTH_ERROR_BASE - 12)
 
+// DAG DEBUG BEG
+/** An error when sending/recv message over authenticated link. */
+#define AUTH_ERROR_IO_ERR		    (AUTH_ERROR_BASE - 13)
+/** Function is not implemented */
+#define AUTH_ERROR_NOT_IMPLEMENTED          (AUTH_ERROR_BASE - 14)
+// DAG DEBUG END
+
 
 /*
  * Flags used when initializing authentication connection
@@ -325,6 +332,46 @@ const char *auth_lib_getstatus_str(enum auth_status status);
 int auth_lib_cancel(struct authenticate_conn *auth_conn);
 
 
+// DAG DEBUG BEG
+/**
+ * Send data over link using authentication method.
+ * @note: Not all links and authentication methods support sending data.
+ *
+ * @param auth_conn   Authentication connection struct.
+ * @param data        Data to send.
+ * @param len         Byte length of the data.
+ *
+ * @return Number of bytes sent on success, else negative error value.
+ */
+int auth_lib_send(struct authenticate_conn *auth_conn, void *data, size_t len);
+
+
+/**
+ * Receive data over link using authentication method.
+ * @note: Not all links and authentication methods support receiving data.
+ *
+ * @param auth_conn   Authentication connection struct.
+ * @param data        Data to send
+ * @param len         Byte length of the data.
+ *
+ * @return  Number of bytes received on success, else negative error value.
+ */
+int auth_lib_recv(struct authenticate_conn *auth_conn, void *data, size_t len);
+
+/**
+ * Determines if the authentication process has finished, either successfully
+ * or because of an error.
+ *
+ * @param auth_conn Authentication connection struct.
+ * @param status    Pointer to the ending or current status (if still in
+ *                  process) of the authentication process.
+ *                  Can be NULL.
+ *
+ * @return  true if authentication has finished, either successfully or otherwise.
+ *          false if the authentication is in process.
+ */
+bool auth_lib_is_finished(struct authenticate_conn *auth_conn, enum auth_status *status);
+// DAG DEBUG END
 
 /**
  * @}

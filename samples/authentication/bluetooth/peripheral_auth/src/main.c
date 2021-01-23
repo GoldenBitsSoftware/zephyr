@@ -41,6 +41,9 @@ static struct bt_uuid_128 auth_client_char = AUTH_SVC_CLIENT_CHAR_UUID;
 
 static struct bt_uuid_128 auth_server_char = AUTH_SVC_SERVER_CHAR;
 
+// DAG DEBUG BEG
+K_SEM_DEFINE(auth_done_sem, 0, 1);
+// DAG DEBUG END
 
 
 #if defined(CONFIG_AUTH_DTLS)
@@ -289,8 +292,47 @@ static void auth_status(struct authenticate_conn *auth_conn, enum auth_instance_
 		printk("     DTLS may take 30-60 seconds.\n");
 	}
 #endif
+
+// DAG DEBUG BEG
+	if(auth_lib_is_finished(auth_conn, NULL)) {
+		k_sem_give(&auth_done_sem);
+	}
+// DAG DEBUG END
 }
 
+
+// DAG DEBUG BEG
+#if defined(CONFIG_AUTH_DTLS)
+
+#define ECHO_BUFFER_LEN		(30)
+static void echo_msg(void)
+{
+	uint8_t recv_msg_buffer[ECHO_BUFFER_LEN];
+	int recv_cnt;
+	int ret;
+
+	while(true) {
+
+		/* wait for response */
+		recv_cnt = auth_lib_recv(&auth_conn, recv_msg_buffer, sizeof(recv_msg_buffer));
+
+		if(recv_cnt < 0) {
+			LOG_ERR("Failed to recv echo test message, ret: %d", recv_cnt);
+			break;
+		}
+
+		/* echo message back */
+		ret = auth_lib_send(&auth_conn, recv_msg_buffer, recv_cnt);
+
+		/* if error on send */
+		if(ret < 0) {
+			LOG_ERR("Failed to send echo test message, ret: %d", ret);
+			break;
+		}
+	}
+}
+#endif
+// DAG DEBUG END
 
 /**
  * Called when client notification is (dis)enabled by the Central
@@ -376,6 +418,18 @@ void main(void)
 	bt_conn_auth_cb_register(&auth_cb_display);
 
 	printk("Peripheral Auth started\n");
+
+// DAG DEBUG BEG
+	/* wait for authentication to finish */
+	k_sem_take(&auth_done_sem, K_FOREVER);
+
+#if defined(CONFIG_AUTH_DTLS)
+	/* echo message between the central and peripheral
+     * using DTLS */
+    echo_msg();
+#endif
+    
+// DAG DEBUG END
 
 	/* Never returns */
 	idle_function();
