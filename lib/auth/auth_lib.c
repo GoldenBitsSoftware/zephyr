@@ -272,7 +272,7 @@ int auth_lib_cancel(struct authenticate_conn *auth_conn)
 /**
  * @see auth_lib.h
  */
-int auth_lib_send(struct authenticate_conn *auth_conn, void *data, size_t len)
+int auth_lib_dtls_send(struct authenticate_conn *auth_conn, void *data, size_t len)
 {
 	int bytes_sent = AUTH_ERROR_NOT_IMPLEMENTED;
 
@@ -300,7 +300,7 @@ int auth_lib_send(struct authenticate_conn *auth_conn, void *data, size_t len)
 /**
  * @see auth_lib.h
  */
-int auth_lib_recv(struct authenticate_conn *auth_conn, void *data, size_t len)
+int auth_lib_dtls_recv(struct authenticate_conn *auth_conn, void *data, size_t len)
 {
 	int bytes_recv = AUTH_ERROR_NOT_IMPLEMENTED;
 

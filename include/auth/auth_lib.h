@@ -334,8 +334,9 @@ int auth_lib_cancel(struct authenticate_conn *auth_conn);
 
 // DAG DEBUG BEG
 /**
- * Send data over link using authentication method.
- * @note: Not all links and authentication methods support sending data.
+ * Send data over DTLS authenticated link. The data is send as an encrypted
+ * DTLS packet.
+ * @note:  This is a blocking call.
  *
  * @param auth_conn   Authentication connection struct.
  * @param data        Data to send.
@@ -343,12 +344,12 @@ int auth_lib_cancel(struct authenticate_conn *auth_conn);
  *
  * @return Number of bytes sent on success, else negative error value.
  */
-int auth_lib_send(struct authenticate_conn *auth_conn, void *data, size_t len);
+int auth_lib_dtls_send(struct authenticate_conn *auth_conn, void *data, size_t len);
 
 
 /**
- * Receive data over link using authentication method.
- * @note: Not all links and authentication methods support receiving data.
+ * Receive data from a DTLS authenticated link.
+ * @note: This is a blocking call.
  *
  * @param auth_conn   Authentication connection struct.
  * @param data        Data to send
@@ -356,7 +357,7 @@ int auth_lib_send(struct authenticate_conn *auth_conn, void *data, size_t len);
  *
  * @return  Number of bytes received on success, else negative error value.
  */
-int auth_lib_recv(struct authenticate_conn *auth_conn, void *data, size_t len);
+int auth_lib_dtls_recv(struct authenticate_conn *auth_conn, void *data, size_t len);
 
 /**
  * Determines if the authentication process has finished, either successfully

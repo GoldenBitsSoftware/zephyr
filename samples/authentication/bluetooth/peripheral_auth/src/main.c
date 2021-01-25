@@ -315,7 +315,7 @@ static void echo_msg(void)
 	while(true) {
 
 		/* wait for response */
-		recv_cnt = auth_lib_recv(&auth_conn, recv_msg_buffer, sizeof(recv_msg_buffer));
+		recv_cnt = auth_lib_dtls_recv(&auth_conn, recv_msg_buffer, sizeof(recv_msg_buffer));
 
 		if(recv_cnt < 0) {
 			LOG_ERR("Failed to recv echo test message, ret: %d", recv_cnt);
@@ -323,7 +323,7 @@ static void echo_msg(void)
 		}
 
 		/* echo message back */
-		ret = auth_lib_send(&auth_conn, recv_msg_buffer, recv_cnt);
+		ret = auth_lib_dtls_send(&auth_conn, recv_msg_buffer, recv_cnt);
 
 		/* if error on send */
 		if(ret < 0) {

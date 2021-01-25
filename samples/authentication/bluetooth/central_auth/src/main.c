@@ -168,7 +168,7 @@ void mtu_change_cb(struct bt_conn *conn, uint8_t err,
  * Characteristic discovery function
  *
  *
- * @param conn    Bluetooth conection.
+ * @param conn    Bluetooth connection.
  * @param attr    Discovered attribute.  NOTE: This pointer will go out fo scope
  *                do not save pointer for future use.
  * @param params  Discover params.
@@ -511,7 +511,7 @@ static void echo_msg(void)
 		/* set buffer with known value, increment for each loop. */
 		memset(send_msg_buffer, msg_cnt, sizeof(send_msg_buffer));
 
-		ret = auth_lib_send(&central_auth_conn, send_msg_buffer, msg_len);
+		ret = auth_lib_dtls_send(&central_auth_conn, send_msg_buffer, msg_len);
 
 		/* if error on send */
 		if(ret != msg_len) {
@@ -520,7 +520,7 @@ static void echo_msg(void)
 		}
 
 		/* wait for response */
-		ret = auth_lib_recv(&central_auth_conn, recv_msg_buffer, sizeof(recv_msg_buffer));
+		ret = auth_lib_dtls_recv(&central_auth_conn, recv_msg_buffer, sizeof(recv_msg_buffer));
 
 		if(ret < 0) {
 			LOG_ERR("Failed to recv echo test message, ret: %d", ret);
